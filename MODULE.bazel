@@ -1,0 +1,24 @@
+# SIP
+# https://github.com/joaospinto/sip
+bazel_dep(name = "sip", dev_dependency = True)
+git_override(
+    module_name = "sip",
+    remote = "https://github.com/joaospinto/sip.git",
+    commit = "d7462d8fe3410c19f3ad49a2f7b9baa106468154",
+)
+
+# eigen
+bazel_dep(name = "eigen", version = "4.0.0-20241125.bcr.1")
+
+# Google Test
+# https://github.com/google/googletest
+bazel_dep(name = "googletest", version = "1.17.0")
+
+# Hedron's Compile Commands Extractor for Bazel
+# https://github.com/hedronvision/bazel-compile-commands-extractor
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+    commit = "4f28899228fb3ad0126897876f147ca15026151e",
+)

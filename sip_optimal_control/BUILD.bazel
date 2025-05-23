@@ -1,0 +1,10 @@
+cc_library(
+	name = "sip_optimal_control",
+	srcs = ["helpers.cpp", "sip_optimal_control.cpp", "types.cpp"],
+	hdrs = ["helpers.hpp","sip_optimal_control.hpp", "types.hpp"],
+  deps = [
+      "@eigen",
+      "@sip//sip",
+  ],
+  visibility = ["//visibility:public",],
+)
