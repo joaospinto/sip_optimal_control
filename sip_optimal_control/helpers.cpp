@@ -2,7 +2,7 @@
 
 #define EIGEN_NO_MALLOC
 
-#include <Eigen/Core>
+#include <Eigen/Dense>
 
 namespace sip::optimal_control {
 
