@@ -645,6 +645,10 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
     y_i_u += jac_u_c_i.transpose() * c_i + B_i.transpose() * x_ip1;
   }
 
+  const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.dc_dx[input_.dimensions.num_stages], input_.dimensions.c_dim,
+      input_.dimensions.state_dim);
+
   const auto x_N =
       Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.state_dim);
   x += input_.dimensions.state_dim;
@@ -654,7 +658,7 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
 
   auto y_N_x = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.state_dim);
 
-  y_N_x += -x_N + c_N;
+  y_N_x += -x_N + jac_x_c_N.transpose() * c_N;
 }
 
 void CallbackProvider::add_Gx_to_y(const double *x, double *y) {
