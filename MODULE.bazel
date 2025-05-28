@@ -2,7 +2,7 @@ module(name = "sip_optimal_control", version = "0.0.1")
 
 # SIP
 # https://github.com/joaospinto/sip
-bazel_dep(name = "sip", dev_dependency = True)
+bazel_dep(name = "sip")
 git_override(
     module_name = "sip",
     remote = "https://github.com/joaospinto/sip.git",
