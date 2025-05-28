@@ -178,7 +178,7 @@ struct Workspace {
     const int z_dim = g_dim * (num_stages + 1);
     return ModelCallbackOutput::num_bytes(state_dim, control_dim, num_stages,
                                           c_dim, g_dim) +
-           ModelCallbackInput::num_bytes(num_stages) + x_dim + y_dim + z_dim +
+           ModelCallbackInput::num_bytes(num_stages) + (x_dim + y_dim + z_dim) * sizeof(double) +
            RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
                                          g_dim) +
            sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
