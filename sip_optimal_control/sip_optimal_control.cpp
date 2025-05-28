@@ -10,7 +10,7 @@ auto build_sip_input(const Input &input, Workspace &workspace) -> sip::Input {
   CallbackProvider callback_provider(input, workspace);
 
   const auto model_callback =
-      [&input, workspace](const sip::ModelCallbackInput &mci) -> void {
+      [&input, &workspace](const sip::ModelCallbackInput &mci) -> void {
     {
       double *x = mci.x;
       if (mci.new_x) {
