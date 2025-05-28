@@ -163,7 +163,7 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
     G_i_inv.noalias() = G_i.inverse();
 
     // H_i = B^T W_i A_i + M_i^T
-    H_i.noalias() = B_i.transpose() * W_i * A_i + M_i_mod;
+    H_i.noalias() = B_i.transpose() * W_i * A_i + M_i_mod.transpose();
 
     // K_i = -G_i^{-1} H_i
     K_i.noalias() = -G_i_inv * H_i;
@@ -172,7 +172,7 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
     V_i.noalias() =
         A_i.transpose() * W_i * A_i + Q_i_mod + K_i.transpose() * H_i;
     for (int j = 0; j < input_.dimensions.state_dim; ++j) {
-      V_i(i, i) += r1;
+      V_i(j, j) += r1;
     }
   }
 }
