@@ -39,7 +39,7 @@ struct ModelCallbackOutput {
   // The first derivative of the cost with respect to controls.
   double **df_du;
 
-  // The dynamics residuals (dyn_i(x_i, u_i) - x_{i+1}).
+  // The dynamics residuals (x_init - x_0 and dyn_i(x_i, u_i) - x_{i+1}).
   double **dyn_res;
   // The first derivative of the dyn_i with respect to the states.
   double **ddyn_dx;
