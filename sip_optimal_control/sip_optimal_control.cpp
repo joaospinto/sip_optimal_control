@@ -6,7 +6,8 @@
 
 namespace sip::optimal_control {
 
-auto build_sip_input(const Input &input, Workspace &workspace) -> sip::Input {
+auto solve(const Input &input, const ::sip::Settings &settings,
+           Workspace &workspace) -> ::sip::Output {
   CallbackProvider callback_provider(input, workspace);
 
   const auto model_callback =
@@ -91,11 +92,11 @@ auto build_sip_input(const Input &input, Workspace &workspace) -> sip::Input {
   const auto factor = [&callback_provider](const double *w, const double r1,
                                            const double r2,
                                            const double r3) -> void {
-    return callback_provider.factor(w, r1, r2, r3);
+    callback_provider.factor(w, r1, r2, r3);
   };
 
   const auto solve = [&callback_provider](const double *b, double *v) -> void {
-    return callback_provider.solve(b, v);
+    callback_provider.solve(b, v);
   };
 
   const auto add_Kx_to_y =
@@ -103,33 +104,32 @@ auto build_sip_input(const Input &input, Workspace &workspace) -> sip::Input {
                            const double r3, const double *x_x,
                            const double *x_y, const double *x_z, double *y_x,
                            double *y_y, double *y_z) -> void {
-    return callback_provider.add_Kx_to_y(w, r1, r2, r3, x_x, x_y, x_z, y_x, y_y,
-                                         y_z);
+    callback_provider.add_Kx_to_y(w, r1, r2, r3, x_x, x_y, x_z, y_x, y_y, y_z);
   };
 
   const auto add_Hx_to_y = [&callback_provider](const double *x,
                                                 double *y) -> void {
-    return callback_provider.add_Hx_to_y(x, y);
+    callback_provider.add_Hx_to_y(x, y);
   };
 
   const auto add_Cx_to_y = [&callback_provider](const double *x,
                                                 double *y) -> void {
-    return callback_provider.add_Cx_to_y(x, y);
+    callback_provider.add_Cx_to_y(x, y);
   };
 
   const auto add_CTx_to_y = [&callback_provider](const double *x,
                                                  double *y) -> void {
-    return callback_provider.add_CTx_to_y(x, y);
+    callback_provider.add_CTx_to_y(x, y);
   };
 
   const auto add_Gx_to_y = [&callback_provider](const double *x,
                                                 double *y) -> void {
-    return callback_provider.add_Gx_to_y(x, y);
+    callback_provider.add_Gx_to_y(x, y);
   };
 
   const auto add_GTx_to_y = [&callback_provider](const double *x,
                                                  double *y) -> void {
-    return callback_provider.add_GTx_to_y(x, y);
+    callback_provider.add_GTx_to_y(x, y);
   };
 
   const auto get_f = [&workspace]() -> double {
@@ -144,7 +144,7 @@ auto build_sip_input(const Input &input, Workspace &workspace) -> sip::Input {
 
   const auto get_g = [&workspace]() -> double * { return workspace.g; };
 
-  return sip::Input{
+  const auto sip_input = sip::Input{
       .factor = std::cref(factor),
       .solve = std::cref(solve),
       .add_Kx_to_y = std::cref(add_Kx_to_y),
@@ -169,11 +169,7 @@ auto build_sip_input(const Input &input, Workspace &workspace) -> sip::Input {
                        (input.dimensions.num_stages * 1),
           },
   };
-}
 
-auto solve(const Input &input, const ::sip::Settings &settings,
-           Workspace &workspace) -> ::sip::Output {
-  const auto sip_input = build_sip_input(input, workspace);
   return sip::solve(sip_input, settings, workspace.sip_workspace);
 }
 
