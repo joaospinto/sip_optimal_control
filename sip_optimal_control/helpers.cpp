@@ -326,10 +326,16 @@ void CallbackProvider::solve(const double *b, double *sol) {
     v_i.noalias() = q_i_mod + A_i.transpose() * g_i + K_i.transpose() * h_i;
   }
 
+  const int x_dim =
+      (input_.dimensions.state_dim + input_.dimensions.control_dim) *
+          input_.dimensions.num_stages +
+      input_.dimensions.state_dim;
+  const int y_dim = (input_.dimensions.state_dim + input_.dimensions.c_dim) *
+                    (input_.dimensions.num_stages + 1);
+
   double *x = sol;
-  double *y =
-      x + (input_.dimensions.state_dim + input_.dimensions.control_dim) * (input_.dimensions.num_stages + 1);
-  double *z = y + (input_.dimensions.state_dim + input_.dimensions.c_dim) * (input_.dimensions.num_stages + 1);
+  double *y = x + x_dim;
+  double *z = y + y_dim;
 
   // Recover x_0 via (I + r2 V_0) x_0 = c_0 - r2 v_0.
   const auto b_y_0_prefix =
@@ -646,8 +652,8 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
   }
 
   const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
-      workspace_.model_callback_output.dc_dx[input_.dimensions.num_stages], input_.dimensions.c_dim,
-      input_.dimensions.state_dim);
+      workspace_.model_callback_output.dc_dx[input_.dimensions.num_stages],
+      input_.dimensions.c_dim, input_.dimensions.state_dim);
 
   const auto x_N =
       Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.state_dim);
