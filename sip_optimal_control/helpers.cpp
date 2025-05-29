@@ -430,7 +430,8 @@ void CallbackProvider::solve(const double *b, double *sol) {
     auto f_ip1 = Eigen::Map<Eigen::VectorXd>(workspace_.regularized_lqr_data.f,
                                              input_.dimensions.state_dim);
 
-    auto x_i = Eigen::Map<Eigen::VectorXd>(x, input_.dimensions.state_dim);
+    const auto x_i =
+        Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.state_dim);
     x += input_.dimensions.state_dim;
     auto u_i = Eigen::Map<Eigen::VectorXd>(x, input_.dimensions.control_dim);
     x += input_.dimensions.control_dim;
