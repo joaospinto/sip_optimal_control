@@ -100,6 +100,14 @@ struct Input {
     int control_dim;
     int c_dim;
     int g_dim;
+
+    int get_x_dim() const {
+      return num_stages * (state_dim + control_dim) + state_dim;
+    }
+
+    int get_y_dim() const { return (c_dim + state_dim) * (num_stages + 1); }
+
+    int get_z_dim() const { return g_dim * (num_stages + 1); }
   };
   using ModelCallback = std::function<void(const ModelCallbackInput &)>;
 
@@ -178,7 +186,8 @@ struct Workspace {
     const int z_dim = g_dim * (num_stages + 1);
     return ModelCallbackOutput::num_bytes(state_dim, control_dim, num_stages,
                                           c_dim, g_dim) +
-           ModelCallbackInput::num_bytes(num_stages) + (x_dim + y_dim + z_dim) * sizeof(double) +
+           ModelCallbackInput::num_bytes(num_stages) +
+           (x_dim + y_dim + z_dim) * sizeof(double) +
            RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
                                          g_dim) +
            sip::Workspace::num_bytes(x_dim, z_dim, y_dim);

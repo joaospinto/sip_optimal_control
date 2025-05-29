@@ -178,16 +178,12 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
 }
 
 void CallbackProvider::solve(const double *b, double *sol) {
-  const double *b_x =
-      b + input_.dimensions.num_stages *
-              (input_.dimensions.state_dim + input_.dimensions.control_dim);
-  const double *b_y =
-      b_x + input_.dimensions.state_dim +
-      input_.dimensions.num_stages *
-          (input_.dimensions.state_dim + input_.dimensions.c_dim) +
-      input_.dimensions.state_dim;
-  const double *b_z = b_y + input_.dimensions.c_dim +
-                      input_.dimensions.num_stages * input_.dimensions.g_dim;
+  const double *b_x = b + input_.dimensions.get_x_dim();
+  const double *b_y = b_x + input_.dimensions.get_y_dim();
+  const double *b_z = b_y + input_.dimensions.get_z_dim();
+  b_x -= input_.dimensions.state_dim;
+  b_y -= input_.dimensions.control_dim;
+  b_z -= input_.dimensions.g_dim;
 
   auto v_N = Eigen::Map<Eigen::VectorXd>(
       workspace_.regularized_lqr_data.v[input_.dimensions.num_stages],
@@ -326,12 +322,8 @@ void CallbackProvider::solve(const double *b, double *sol) {
     v_i.noalias() = q_i_mod + A_i.transpose() * g_i + K_i.transpose() * h_i;
   }
 
-  const int x_dim =
-      (input_.dimensions.state_dim + input_.dimensions.control_dim) *
-          input_.dimensions.num_stages +
-      input_.dimensions.state_dim;
-  const int y_dim = (input_.dimensions.state_dim + input_.dimensions.c_dim) *
-                    (input_.dimensions.num_stages + 1);
+  const int x_dim = input_.dimensions.get_x_dim();
+  const int y_dim = input_.dimensions.get_y_dim();
 
   double *x = sol;
   double *y = x + x_dim;
@@ -489,14 +481,9 @@ void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
   add_Gx_to_y(x_x, y_z);
   add_GTx_to_y(x_z, y_x);
 
-  const int x_dim =
-      input_.dimensions.num_stages *
-          (input_.dimensions.state_dim + input_.dimensions.control_dim) +
-      input_.dimensions.state_dim;
-  const int y_dim = (input_.dimensions.c_dim + input_.dimensions.state_dim) *
-                    (input_.dimensions.num_stages + 1);
-  const int z_dim =
-      input_.dimensions.g_dim * (input_.dimensions.num_stages + 1);
+  const int x_dim = input_.dimensions.get_x_dim();
+  const int y_dim = input_.dimensions.get_y_dim();
+  const int z_dim = input_.dimensions.get_z_dim();
 
   for (int i = 0; i < x_dim; ++i) {
     y_x[i] += r1 * x_x[i];
