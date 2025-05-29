@@ -161,8 +161,8 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       .timeout_callback = std::cref(input.timeout_callback),
       .dimensions =
           {
-              .x_dim = input.dimensions.state_dim *
-                       (input.dimensions.num_stages + 1),
+              .x_dim = (input.dimensions.state_dim + input.dimensions.control_dim) *
+                       input.dimensions.num_stages + input.dimensions.state_dim,
               .s_dim =
                   input.dimensions.g_dim * (input.dimensions.num_stages + 1),
               .y_dim = (input.dimensions.state_dim + input.dimensions.c_dim) *

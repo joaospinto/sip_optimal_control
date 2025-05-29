@@ -269,7 +269,7 @@ void CallbackProvider::solve(const double *b, double *sol) {
         workspace_.model_callback_output.dg_du[i], input_.dimensions.g_dim,
         input_.dimensions.control_dim);
 
-    const auto v_ip1 = Eigen::Map<Eigen::VectorXd>(
+    const auto v_ip1 = Eigen::Map<const Eigen::VectorXd>(
         workspace_.regularized_lqr_data.v[i + 1], input_.dimensions.state_dim);
 
     const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
