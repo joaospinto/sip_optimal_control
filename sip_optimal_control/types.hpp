@@ -53,7 +53,7 @@ struct ModelCallbackOutput {
   // The first derivative of the c(x) with respect to the controls.
   double **dc_du;
 
-  // The inequality constraint values (g(x) < 0).
+  // The inequality constraint values (g(x) <= 0).
   double **g;
   // The first derivative of the g(x) with respect to the states.
   double **dg_dx;
