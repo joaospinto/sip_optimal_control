@@ -328,8 +328,8 @@ void CallbackProvider::solve(const double *b, double *sol) {
 
   double *x = sol;
   double *y =
-      x + input_.dimensions.state_dim * (input_.dimensions.num_stages + 1);
-  double *z = y + input_.dimensions.c_dim * (input_.dimensions.num_stages + 1);
+      x + (input_.dimensions.state_dim + input_.dimensions.control_dim) * (input_.dimensions.num_stages + 1);
+  double *z = y + (input_.dimensions.state_dim + input_.dimensions.c_dim) * (input_.dimensions.num_stages + 1);
 
   // Recover x_0 via (I + r2 V_0) x_0 = c_0 - r2 v_0.
   const auto b_y_0_prefix =
