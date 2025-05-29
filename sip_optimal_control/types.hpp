@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sip/types.hpp"
+#include "sip_optimal_control/lqr.hpp"
 
 #include <Eigen/Core>
 
@@ -82,14 +83,42 @@ struct ModelCallbackOutput {
   // For knowing how much memory to pre-allocate.
   static constexpr auto num_bytes(int state_dim, int control_dim,
                                   int num_stages, int c_dim, int g_dim) -> int {
-    return (14 * num_stages + 7) * sizeof(double *) +
-           ((num_stages + 1) *
-                (2 * state_dim + c_dim * (1 + state_dim) +
-                 g_dim * (1 + state_dim) + state_dim * state_dim) +
-            num_stages * (control_dim + state_dim * (state_dim + control_dim) +
-                          (c_dim + g_dim) * control_dim +
-                          control_dim * (state_dim + control_dim))) *
-               sizeof(double);
+    const int n = state_dim;
+    const int m = control_dim;
+    const int T = num_stages;
+
+    const int df_dx_size =
+        (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
+    const int df_du_size = T * sizeof(double *) + T * m * sizeof(double);
+
+    const int dyn_res_size =
+        (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
+    const int ddyn_dx_size = T * sizeof(double *) + T * n * n * sizeof(double);
+    const int ddyn_du_size = T * sizeof(double *) + T * n * m * sizeof(double);
+
+    const int c_size =
+        (T + 1) * sizeof(double *) + (T + 1) * c_dim * sizeof(double);
+    const int dc_dx_size =
+        (T + 1) * sizeof(double *) + (T + 1) * c_dim * n * sizeof(double);
+    const int dc_du_size =
+        T * sizeof(double *) + T * c_dim * m * sizeof(double);
+
+    const int g_size =
+        (T + 1) * sizeof(double *) + (T + 1) * g_dim * sizeof(double);
+    const int dg_dx_size =
+        (T + 1) * sizeof(double *) + (T + 1) * g_dim * n * sizeof(double);
+    const int dg_du_size =
+        T * sizeof(double *) + T * g_dim * m * sizeof(double);
+
+    const int d2L_dx2_size =
+        (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
+    const int d2L_dxdu_size = T * sizeof(double *) + T * n * m * sizeof(double);
+    const int d2L_du2_size = T * sizeof(double *) + T * m * m * sizeof(double);
+
+    return df_dx_size + df_du_size + dyn_res_size + ddyn_dx_size +
+           ddyn_du_size + c_size + dc_dx_size + dc_du_size + g_size +
+           dg_dx_size + dg_du_size + d2L_dx2_size + d2L_dxdu_size +
+           d2L_du2_size;
   }
 };
 
@@ -121,30 +150,14 @@ struct Input {
 
 struct Workspace {
   struct RegularizedLQRData {
-    // NOTE: we need to store these for ALL stages.
-    double **W;
-    double **K;
-    double **V;
-    double **G_inv;
-    double **k;
-    double **v;
 
-    // NOTE: we only need to store these for one stage at a time.
-    double *G;
-    double *g;
-    double *H;
-    double *h;
-    double *F;
-    double *F_inv;
-    double *f;
-
-    // Other helpers.
     double **mod_w_inv;
-    double *Q_mod;
-    double *M_mod;
-    double *R_mod;
-    double *q_mod;
-    double *r_mod;
+    double **Q_mod;
+    double **M_mod;
+    double **R_mod;
+    double **q_mod;
+    double **r_mod;
+    double **c_mod;
     double r2;
     double r2_inv;
 
@@ -159,13 +172,24 @@ struct Workspace {
     // For knowing how much memory to pre-allocate.
     static constexpr auto num_bytes(int state_dim, int control_dim,
                                     int num_stages, int g_dim) -> int {
-      return (7 * num_stages + 3) * sizeof(double *) +
-             ((num_stages + 1) * (state_dim * (state_dim + 1) + g_dim) +
-              (num_stages * (state_dim * (state_dim + control_dim) +
-                             control_dim * (control_dim + 1))) +
-              control_dim * (2 * control_dim + 2 * state_dim + 3) +
-              state_dim * (3 * state_dim + 2)) *
-                 sizeof(double);
+      const int T = num_stages;
+      const int n = state_dim;
+      const int m = control_dim;
+
+      const int mod_w_inv_size =
+          (T + 1) * sizeof(double *) + (T + 1) * g_dim * sizeof(double);
+      const int Q_mod_size =
+          (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
+      const int M_mod_size = T * sizeof(double *) + T * n * m * sizeof(double);
+      const int R_mod_size = T * sizeof(double *) + T * m * m * sizeof(double);
+      const int q_mod_size =
+          (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
+      const int r_mod_size = T * sizeof(double *) + T * m * sizeof(double);
+      const int c_mod_size =
+          (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
+
+      return mod_w_inv_size + Q_mod_size + M_mod_size + R_mod_size +
+             q_mod_size + r_mod_size + c_mod_size;
     }
   };
 
@@ -188,6 +212,8 @@ struct Workspace {
                                           c_dim, g_dim) +
            ModelCallbackInput::num_bytes(num_stages) +
            (x_dim + y_dim + z_dim) * sizeof(double) +
+           LQR::Workspace::num_bytes(state_dim, control_dim, num_stages) +
+           LQR::Output::num_bytes(num_stages) +
            RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
                                          g_dim) +
            sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
@@ -200,6 +226,10 @@ struct Workspace {
   double *gradient_f;
   double *c;
   double *g;
+
+  LQR::Workspace lqr_workspace;
+
+  LQR::Output lqr_output;
 
   RegularizedLQRData regularized_lqr_data;
 

@@ -1,10 +1,45 @@
 cc_library(
-	name = "sip_optimal_control",
-	srcs = ["helpers.cpp", "sip_optimal_control.cpp", "types.cpp"],
-	hdrs = ["helpers.hpp","sip_optimal_control.hpp", "types.hpp"],
+	name = "lqr",
+	srcs = ["lqr.cpp",],
+	hdrs = ["lqr.hpp",],
   deps = [
-      "@eigen",
-      "@sip//sip",
+    "@eigen",
+  ],
+  visibility = ["//visibility:public",],
+)
+
+cc_library(
+	name = "types",
+	srcs = ["types.cpp",],
+	hdrs = ["types.hpp",],
+  deps = [
+    ":lqr",
+    "@sip//sip",
+  ],
+  visibility = ["//visibility:public",],
+)
+
+cc_library(
+	name = "helpers",
+	srcs = ["helpers.cpp",],
+	hdrs = ["helpers.hpp",],
+  deps = [
+    ":types",
+    "@eigen",
+  ],
+  visibility = ["//visibility:public",],
+)
+
+cc_library(
+	name = "sip_optimal_control",
+	srcs = ["sip_optimal_control.cpp"],
+	hdrs = ["sip_optimal_control.hpp"],
+  deps = [
+    ":helpers",
+    ":lqr",
+    ":types",
+    "@eigen",
+    "@sip//sip",
   ],
   visibility = ["//visibility:public",],
 )

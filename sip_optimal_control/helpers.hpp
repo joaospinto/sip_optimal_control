@@ -23,6 +23,7 @@ public:
 private:
   const Input &input_;
   Workspace &workspace_;
+  LQR::Input lqr_input_;
 };
 
 } // namespace sip::optimal_control
