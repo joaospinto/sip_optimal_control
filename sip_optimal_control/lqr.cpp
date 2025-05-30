@@ -239,8 +239,7 @@ void LQR::factor(const double δ) {
 
     // NOTE: We use H_i as scratch memory for computing G_i.
     H_i.noalias() = B_i.transpose() * W_i;
-    G_i.noalias() = H_i * B_i;
-    G_i += R_i;
+    G_i.noalias() = R_i + H_i * B_i;
 
     G_i_inv.setIdentity();
     {
@@ -250,17 +249,15 @@ void LQR::factor(const double δ) {
 
     // NOTE: We use K_i as scratch memory for computing H_i.
     K_i.noalias() = B_i.transpose() * W_i;
-    H_i.noalias() = K_i * A_i;
-    H_i += M_i.transpose();
+    H_i.noalias() = M_i.transpose() + K_i * A_i;
 
     K_i.noalias() = -G_i_inv * H_i;
 
     // NOTE: We use scratch_F as scratch memory for computing V_i.
     scratch_F.noalias() = A_i.transpose() * W_i;
     V_i.noalias() = scratch_F * A_i;
-    scratch_F.noalias() = K_i.transpose() * H_i;
+    scratch_F.noalias() = Q_i + K_i.transpose() * H_i;
     V_i += scratch_F;
-    V_i += Q_i;
   }
 }
 
@@ -294,18 +291,6 @@ void LQR::solve(const double δ, Output &output) {
     const auto v_ip1 = Eigen::Map<const Eigen::VectorXd>(
         workspace_.v[i + 1], input_.dimensions.state_dim);
 
-    auto g_i =
-        Eigen::Map<Eigen::VectorXd>(workspace_.g, input_.dimensions.state_dim);
-
-    auto h_i = Eigen::Map<Eigen::VectorXd>(workspace_.h,
-                                           input_.dimensions.control_dim);
-
-    auto k_i = Eigen::Map<Eigen::VectorXd>(workspace_.k[i],
-                                           input_.dimensions.control_dim);
-
-    auto v_i = Eigen::Map<Eigen::VectorXd>(workspace_.v[i],
-                                           input_.dimensions.state_dim);
-
     const auto W_i = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.W[i], input_.dimensions.state_dim,
         input_.dimensions.state_dim);
@@ -318,22 +303,28 @@ void LQR::solve(const double δ, Output &output) {
         workspace_.K[i], input_.dimensions.control_dim,
         input_.dimensions.state_dim);
 
-    auto scratch_f =
+    auto g_i =
+        Eigen::Map<Eigen::VectorXd>(workspace_.g, input_.dimensions.state_dim);
+
+    auto h_i = Eigen::Map<Eigen::VectorXd>(workspace_.h,
+                                           input_.dimensions.control_dim);
+
+    auto k_i = Eigen::Map<Eigen::VectorXd>(workspace_.k[i],
+                                           input_.dimensions.control_dim);
+
+    auto v_i = Eigen::Map<Eigen::VectorXd>(workspace_.v[i],
+                                           input_.dimensions.state_dim);
+
+    auto f_i =
         Eigen::Map<Eigen::VectorXd>(workspace_.f, input_.dimensions.state_dim);
 
-    // NOTE: We use scratch_f as scratch memory for computing g_i.
-    scratch_f.noalias() = c_ip1 - δ * v_ip1;
-    g_i.noalias() = W_i * scratch_f;
-    g_i += v_ip1;
+    f_i.noalias() = δ * v_ip1 - c_ip1;
+    g_i.noalias() = v_ip1 - W_i * f_i;
 
     h_i.noalias() = r_i + B_i.transpose() * g_i;
     k_i.noalias() = -G_i_inv * h_i;
 
-    // NOTE: We use scratch_f as scratch memory for computing v_i.
-    v_i.noalias() = A_i.transpose() * g_i;
-    scratch_f.noalias() = K_i.transpose() * h_i;
-    v_i += scratch_f;
-    v_i += q_i;
+    v_i.noalias() = q_i + A_i.transpose() * g_i + K_i.transpose() * h_i;
   }
 
   const auto c_0 = Eigen::Map<const Eigen::VectorXd>(
@@ -358,8 +349,7 @@ void LQR::solve(const double δ, Output &output) {
 
   auto y_0 =
       Eigen::Map<Eigen::VectorXd>(output.y[0], input_.dimensions.state_dim);
-  y_0.noalias() = V_0 * x_0;
-  y_0 += v_0;
+  y_0.noalias() = v_0 + V_0 * x_0;
 
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto A_i = Eigen::Map<const Eigen::MatrixXd>(
@@ -399,24 +389,20 @@ void LQR::solve(const double δ, Output &output) {
     auto f_i =
         Eigen::Map<Eigen::VectorXd>(workspace_.f, input_.dimensions.state_dim);
 
-    u_i.noalias() = K_i * x_i;
-    u_i += k_i;
+    u_i.noalias() = k_i + K_i * x_i;
+
+    x_ip1.noalias() = A_i * x_i + B_i * u_i;
+    f_i.noalias() = δ * v_ip1 - c_ip1;
+    x_ip1 -= f_i;
 
     F_ip1.setIdentity();
     F_ip1 += δ * V_ip1;
-    x_ip1.noalias() = A_i * x_i;
-    // NOTE: We use f_i as scratch memory for computing x_ip1.
-    f_i.noalias() = B_i * u_i;
-    x_ip1 += f_i;
-    f_i.noalias() = δ * v_ip1 - c_ip1;
-    x_ip1 -= f_i;
     {
       Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_ip1);
       llt.solveInPlace(x_ip1);
     }
 
-    y_ip1_prefix.noalias() = V_ip1 * x_ip1;
-    y_ip1_prefix += v_ip1;
+    y_ip1_prefix.noalias() = v_ip1 + V_ip1 * x_ip1;
   }
 }
 
