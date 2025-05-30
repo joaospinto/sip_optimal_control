@@ -228,7 +228,6 @@ void LQR::factor(const double δ) {
     auto scratch_F = Eigen::Map<Eigen::MatrixXd>(
         workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
 
-    // W_i = (I + δ V_ip1)^{-1} V_ip1
     // NOTE: We use V_i as scratch memory for computing W_i.
     V_i.setIdentity();
     V_i += δ * V_ip1;
@@ -268,7 +267,6 @@ void LQR::solve(const double δ, Output &output) {
   auto v_N = Eigen::Map<Eigen::VectorXd>(
       workspace_.v[input_.dimensions.num_stages], input_.dimensions.state_dim);
 
-  // v_N = q_N
   v_N.noalias() = q_N;
 
   for (int i = input_.dimensions.num_stages - 1; i >= 0; --i) {
