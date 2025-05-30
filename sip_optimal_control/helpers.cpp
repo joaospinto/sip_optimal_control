@@ -49,9 +49,8 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
                                                    input_.dimensions.g_dim);
 
     for (int j = 0; j < input_.dimensions.g_dim; ++j) {
-      mod_w_inv_i(j) = 1.0 / (w[w_offset + j] + r3);
+      mod_w_inv_i(j) = 1.0 / (w[w_offset++] + r3);
     }
-    w_offset += input_.dimensions.g_dim;
 
     auto Q_i_mod = Eigen::Map<Eigen::MatrixXd>(lqr_data.Q_mod[i],
                                                input_.dimensions.state_dim,
@@ -95,7 +94,7 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
       input_.dimensions.g_dim);
 
   for (int j = 0; j < input_.dimensions.g_dim; ++j) {
-    mod_w_inv_N(j) = 1.0 / (w[w_offset + j] + r3);
+    mod_w_inv_N(j) = 1.0 / (w[w_offset++] + r3);
   }
 
   auto Q_N_mod = Eigen::Map<Eigen::MatrixXd>(
