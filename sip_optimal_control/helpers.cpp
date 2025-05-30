@@ -320,10 +320,10 @@ void CallbackProvider::solve(const double *b, double *sol) {
     z += input_.dimensions.g_dim;
 
     y_i_suffix.noalias() =
-        r2_inv * (jac_x_c_i * x_i + jac_u_c_i * u_i + b_y_i_suffix);
+        r2_inv * (jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix);
 
     z_i.noalias() =
-        mod_w_inv_i.asDiagonal() * (jac_x_g_i * x_i + jac_u_g_i * u_i + b_z_i);
+        mod_w_inv_i.asDiagonal() * (jac_x_g_i * x_i + jac_u_g_i * u_i - b_z_i);
   }
 
   const auto x_N =
@@ -348,10 +348,10 @@ void CallbackProvider::solve(const double *b, double *sol) {
       input_.dimensions.g_dim);
 
   auto y_N_suffix = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.c_dim);
-  y_N_suffix.noalias() = r2_inv * (jac_x_c_N * x_N + b_y_N_suffix);
+  y_N_suffix.noalias() = r2_inv * (jac_x_c_N * x_N - b_y_N_suffix);
 
   auto z_N = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
-  z_N.noalias() = mod_w_inv_N.asDiagonal() * (jac_x_g_N * x_N + b_z_N);
+  z_N.noalias() = mod_w_inv_N.asDiagonal() * (jac_x_g_N * x_N - b_z_N);
 }
 
 void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
