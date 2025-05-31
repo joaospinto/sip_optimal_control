@@ -275,6 +275,7 @@ void CallbackProvider::solve(const double *b, double *sol) {
   double *z = y + y_dim;
 
   b_y += input_.dimensions.state_dim;
+  y += input_.dimensions.state_dim;
 
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto jac_x_c_i = Eigen::Map<const Eigen::MatrixXd>(
