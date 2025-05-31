@@ -1,5 +1,14 @@
 # sip_optimal_control
 
-Provides a simple and convenient interface for running SIP on dense optimal control problems.
-Equips SIP with a regularized LQR Newton-KKT system solver and explores the stagewise block
-nature of the problem.
+This repository implements an optimal control front-end to the
+[SIP](https://github.com/joaospinto/regularized_lqr_jax)
+solver.
+
+The stagewise nature of the optimal control problems allows us
+to reduce the Newton-KKT linear system solves to
+[regularized LQR](https://github.com/joaospinto/regularized_lqr_jax)
+problems.
+
+You can find a usage example in the
+[SIP Examples](https://github.com/joaospinto/sip_examples)
+repository.
