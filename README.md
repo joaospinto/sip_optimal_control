@@ -1,7 +1,7 @@
 # sip_optimal_control
 
 This repository implements an optimal control front-end to the
-[SIP](https://github.com/joaospinto/regularized_lqr_jax)
+[SIP](https://github.com/joaospinto/sip)
 solver.
 
 The stagewise nature of the optimal control problems allows us
