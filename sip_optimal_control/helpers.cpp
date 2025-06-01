@@ -259,8 +259,6 @@ void CallbackProvider::solve(const double *b, double *sol) {
       sol_y += input_.dimensions.state_dim + input_.dimensions.c_dim;
     }
     lqr_output.x[input_.dimensions.num_stages] = sol_x;
-    sol_x += input_.dimensions.state_dim;
-    lqr_output.u[input_.dimensions.num_stages] = sol_x;
     lqr_output.y[input_.dimensions.num_stages] = sol_y;
   }
 
