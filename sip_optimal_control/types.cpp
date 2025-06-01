@@ -67,8 +67,8 @@ void ModelCallbackOutput::reserve(int state_dim, int control_dim,
     df_dx[i] = new double[state_dim];
     df_du[i] = new double[control_dim];
     dyn_res[i] = new double[state_dim];
-    ddyn_dx[i] = new double[state_dim];
-    ddyn_du[i] = new double[control_dim];
+    ddyn_dx[i] = new double[state_dim * state_dim];
+    ddyn_du[i] = new double[state_dim * control_dim];
     c[i] = new double[c_dim];
     dc_dx[i] = new double[c_dim * state_dim];
     dc_du[i] = new double[c_dim * control_dim];
