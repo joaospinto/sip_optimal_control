@@ -229,8 +229,9 @@ void LQR::factor(const double δ) {
         workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
 
     // NOTE: We use V_i as scratch memory for computing W_i.
-    V_i.setIdentity();
-    V_i += δ * V_ip1;
+    V_i.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                              input_.dimensions.state_dim) +
+                    δ * V_ip1;
     {
       Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(V_i);
       W_i.noalias() = llt.solve(V_ip1);
@@ -337,8 +338,9 @@ void LQR::solve(const double δ, Output &output) {
 
   auto x_0 =
       Eigen::Map<Eigen::VectorXd>(output.x[0], input_.dimensions.state_dim);
-  F_0.setIdentity();
-  F_0 += δ * V_0;
+  F_0.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                            input_.dimensions.state_dim) +
+                  δ * V_0;
   x_0.noalias() = c_0 - δ * v_0;
   {
     Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_0);
@@ -393,8 +395,9 @@ void LQR::solve(const double δ, Output &output) {
     f_i.noalias() = δ * v_ip1 - c_ip1;
     x_ip1 -= f_i;
 
-    F_ip1.setIdentity();
-    F_ip1 += δ * V_ip1;
+    F_ip1.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                                input_.dimensions.state_dim) +
+                      δ * V_ip1;
     {
       Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_ip1);
       llt.solveInPlace(x_ip1);

@@ -101,13 +101,11 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
       lqr_data.Q_mod[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
 
-  Q_N_mod.noalias() = Q_N;
-  for (int i = 0; i < input_.dimensions.state_dim; ++i) {
-    Q_N_mod(i, i) += r1;
-  }
-  Q_N_mod.noalias() += r2_inv * jac_x_c_N.transpose() * jac_x_c_N;
-  Q_N_mod.noalias() +=
-      jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * jac_x_g_N;
+  Q_N_mod.noalias() =
+      Q_N + r1 * Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                           input_.dimensions.state_dim);
+  Q_N_mod += r2_inv * jac_x_c_N.transpose() * jac_x_c_N;
+  Q_N_mod += jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * jac_x_g_N;
 
   lqr_input_.Q = lqr_data.Q_mod;
   lqr_input_.M = lqr_data.M_mod;
