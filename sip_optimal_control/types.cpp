@@ -63,7 +63,7 @@ void ModelCallbackOutput::reserve(int state_dim, int control_dim,
   d2L_dxdu = new double *[num_stages];
   d2L_du2 = new double *[num_stages];
 
-  for (int i = 0; i <= num_stages; ++i) {
+  for (int i = 0; i < num_stages; ++i) {
     df_dx[i] = new double[state_dim];
     df_du[i] = new double[control_dim];
     dyn_res[i] = new double[state_dim];
@@ -79,6 +79,14 @@ void ModelCallbackOutput::reserve(int state_dim, int control_dim,
     d2L_dxdu[i] = new double[state_dim * control_dim];
     d2L_du2[i] = new double[control_dim * control_dim];
   }
+
+  df_dx[num_stages] = new double[state_dim];
+  dyn_res[num_stages] = new double[state_dim];
+  c[num_stages] = new double[c_dim];
+  dc_dx[num_stages] = new double[c_dim * state_dim];
+  g[num_stages] = new double[g_dim];
+  dg_dx[num_stages] = new double[g_dim * state_dim];
+  d2L_dx2[num_stages] = new double[state_dim * state_dim];
 }
 
 void ModelCallbackOutput::free(int num_stages) {
