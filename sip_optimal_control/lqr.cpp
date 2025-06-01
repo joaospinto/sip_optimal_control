@@ -57,7 +57,7 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
   v[num_stages] = new double[state_dim];
 
   G = new double[control_dim * control_dim];
-  g = new double[control_dim];
+  g = new double[state_dim];
   H = new double[control_dim * state_dim];
   h = new double[control_dim];
   F = new double[state_dim * state_dim];
@@ -144,7 +144,7 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
   cum_size += control_dim * control_dim * sizeof(double);
 
   g = reinterpret_cast<double *>(mem_ptr + cum_size);
-  cum_size += control_dim * sizeof(double);
+  cum_size += state_dim * sizeof(double);
 
   H = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += control_dim * state_dim * sizeof(double);
