@@ -280,15 +280,16 @@ void LQR::factor(const double δ) {
       llt.solveInPlace(G_i_inv);
     }
 
-    // NOTE: We use K_i as scratch memory for computing H_i.
-    K_i.noalias() = B_i.transpose() * W_i;
-    H_i.noalias() = M_i.transpose() + K_i * A_i;
+    // NOTE: We use F_i as scratch memory for computing H_i and V_i.
+    F_i.noalias() = W_i * A_i;
+
+    // NOTE: We use F_i as scratch memory for computing H_i.
+    H_i.noalias() = M_i.transpose() + B_i.transpose() * F_i;
 
     K_i.noalias() = -G_i_inv * H_i;
 
     // NOTE: We use F_i as scratch memory for computing V_i.
-    F_i.noalias() = A_i.transpose() * W_i;
-    V_i.noalias() = F_i * A_i;
+    V_i.noalias() = A_i.transpose() * F_i;
     F_i.noalias() = Q_i + K_i.transpose() * H_i;
     V_i += F_i;
 
