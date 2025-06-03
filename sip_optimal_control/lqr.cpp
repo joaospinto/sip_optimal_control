@@ -41,6 +41,7 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
   K = new double *[num_stages];
   V = new double *[num_stages + 1];
   G_inv = new double *[num_stages];
+  F_inv = new double *[num_stages + 1];
   k = new double *[num_stages];
   v = new double *[num_stages + 1];
 
@@ -49,12 +50,14 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
     K[i] = new double[control_dim * state_dim];
     V[i] = new double[state_dim * state_dim];
     G_inv[i] = new double[control_dim * control_dim];
+    F_inv[i] = new double[state_dim * state_dim];
     k[i] = new double[control_dim];
     v[i] = new double[state_dim];
   }
 
   V[num_stages] = new double[state_dim * state_dim];
   v[num_stages] = new double[state_dim];
+  F_inv[num_stages] = new double[state_dim * state_dim];
 
   G = new double[control_dim * control_dim];
   g = new double[state_dim];
@@ -77,17 +80,20 @@ void LQR::Workspace::free(int num_stages) {
     delete[] K[i];
     delete[] V[i];
     delete[] G_inv[i];
+    delete[] F_inv[i];
     delete[] k[i];
     delete[] v[i];
   }
 
   delete[] V[num_stages];
   delete[] v[num_stages];
+  delete[] F_inv[num_stages];
 
   delete[] W;
   delete[] K;
   delete[] V;
   delete[] G_inv;
+  delete[] F_inv;
   delete[] k;
   delete[] v;
 }
@@ -108,6 +114,9 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
   G_inv = reinterpret_cast<double **>(mem_ptr + cum_size);
   cum_size += num_stages * sizeof(double *);
 
+  F_inv = reinterpret_cast<double **>(mem_ptr + cum_size);
+  cum_size += (num_stages + 1) * sizeof(double *);
+
   k = reinterpret_cast<double **>(mem_ptr + cum_size);
   cum_size += num_stages * sizeof(double *);
 
@@ -127,6 +136,9 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
     G_inv[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
     cum_size += control_dim * control_dim * sizeof(double);
 
+    F_inv[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
+    cum_size += state_dim * state_dim * sizeof(double);
+
     k[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
     cum_size += control_dim * sizeof(double);
 
@@ -139,6 +151,9 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
 
   v[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += state_dim * sizeof(double);
+
+  F_inv[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += state_dim * state_dim * sizeof(double);
 
   G = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += control_dim * control_dim * sizeof(double);
@@ -176,7 +191,24 @@ void LQR::factor(const double δ) {
       workspace_.V[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
 
+  auto F_N = Eigen::Map<Eigen::MatrixXd>(
+      workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
+
+  auto F_N_inv = Eigen::Map<Eigen::MatrixXd>(
+      workspace_.F_inv[input_.dimensions.num_stages],
+      input_.dimensions.state_dim, input_.dimensions.state_dim);
+
   V_N.noalias() = Q_N;
+
+  F_N.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                            input_.dimensions.state_dim) +
+                  δ * V_N;
+
+  F_N_inv.setIdentity();
+  {
+    Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_N);
+    llt.solveInPlace(F_N_inv);
+  }
 
   for (int i = input_.dimensions.num_stages - 1; i >= 0; --i) {
     const auto A_i = Eigen::Map<const Eigen::MatrixXd>(
@@ -201,6 +233,10 @@ void LQR::factor(const double δ) {
         workspace_.V[i + 1], input_.dimensions.state_dim,
         input_.dimensions.state_dim);
 
+    const auto F_ip1_inv = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.F_inv[i + 1], input_.dimensions.state_dim,
+        input_.dimensions.state_dim);
+
     auto W_i = Eigen::Map<Eigen::MatrixXd>(workspace_.W[i],
                                            input_.dimensions.state_dim,
                                            input_.dimensions.state_dim);
@@ -212,6 +248,10 @@ void LQR::factor(const double δ) {
     auto G_i_inv = Eigen::Map<Eigen::MatrixXd>(workspace_.G_inv[i],
                                                input_.dimensions.control_dim,
                                                input_.dimensions.control_dim);
+
+    auto F_i_inv = Eigen::Map<Eigen::MatrixXd>(workspace_.F_inv[i],
+                                               input_.dimensions.state_dim,
+                                               input_.dimensions.state_dim);
 
     auto H_i =
         Eigen::Map<Eigen::MatrixXd>(workspace_.H, input_.dimensions.control_dim,
@@ -225,17 +265,10 @@ void LQR::factor(const double δ) {
                                            input_.dimensions.state_dim,
                                            input_.dimensions.state_dim);
 
-    auto scratch_F = Eigen::Map<Eigen::MatrixXd>(
+    auto F_i = Eigen::Map<Eigen::MatrixXd>(
         workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
 
-    // NOTE: We use V_i as scratch memory for computing W_i.
-    V_i.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                              input_.dimensions.state_dim) +
-                    δ * V_ip1;
-    {
-      Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(V_i);
-      W_i.noalias() = llt.solve(V_ip1);
-    }
+    W_i.noalias() = F_ip1_inv * V_ip1;
 
     // NOTE: We use H_i as scratch memory for computing G_i.
     H_i.noalias() = B_i.transpose() * W_i;
@@ -253,11 +286,20 @@ void LQR::factor(const double δ) {
 
     K_i.noalias() = -G_i_inv * H_i;
 
-    // NOTE: We use scratch_F as scratch memory for computing V_i.
-    scratch_F.noalias() = A_i.transpose() * W_i;
-    V_i.noalias() = scratch_F * A_i;
-    scratch_F.noalias() = Q_i + K_i.transpose() * H_i;
-    V_i += scratch_F;
+    // NOTE: We use F_i as scratch memory for computing V_i.
+    F_i.noalias() = A_i.transpose() * W_i;
+    V_i.noalias() = F_i * A_i;
+    F_i.noalias() = Q_i + K_i.transpose() * H_i;
+    V_i += F_i;
+
+    F_i.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                              input_.dimensions.state_dim) +
+                    δ * V_i;
+    F_i_inv.setIdentity();
+    {
+      Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_i);
+      llt.solveInPlace(F_i_inv);
+    }
   }
 }
 
@@ -328,24 +370,25 @@ void LQR::solve(const double δ, Output &output) {
 
   const auto c_0 = Eigen::Map<const Eigen::VectorXd>(
       input_.c[0], input_.dimensions.state_dim);
+
   const auto V_0 = Eigen::Map<const Eigen::MatrixXd>(
       workspace_.V[0], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
+
   const auto v_0 = Eigen::Map<const Eigen::VectorXd>(
       workspace_.v[0], input_.dimensions.state_dim);
-  auto F_0 = Eigen::Map<Eigen::MatrixXd>(
-      workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
+
+  const auto F_0_inv = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.F_inv[0], input_.dimensions.state_dim,
+      input_.dimensions.state_dim);
+
+  auto f_0 =
+      Eigen::Map<Eigen::VectorXd>(workspace_.f, input_.dimensions.state_dim);
 
   auto x_0 =
       Eigen::Map<Eigen::VectorXd>(output.x[0], input_.dimensions.state_dim);
-  F_0.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                            input_.dimensions.state_dim) +
-                  δ * V_0;
-  x_0.noalias() = c_0 - δ * v_0;
-  {
-    Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_0);
-    llt.solveInPlace(x_0);
-  }
+  f_0.noalias() = δ * v_0 - c_0;
+  x_0.noalias() = -F_0_inv * f_0;
 
   auto y_0 =
       Eigen::Map<Eigen::VectorXd>(output.y[0], input_.dimensions.state_dim);
@@ -358,6 +401,10 @@ void LQR::solve(const double δ, Output &output) {
     const auto B_i = Eigen::Map<const Eigen::MatrixXd>(
         input_.B[i], input_.dimensions.state_dim,
         input_.dimensions.control_dim);
+
+    const auto F_ip1_inv = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.F_inv[i + 1], input_.dimensions.state_dim,
+        input_.dimensions.state_dim);
 
     const auto K_i = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.K[i], input_.dimensions.control_dim,
@@ -374,9 +421,6 @@ void LQR::solve(const double δ, Output &output) {
     const auto c_ip1 = Eigen::Map<const Eigen::VectorXd>(
         input_.c[i + 1], input_.dimensions.state_dim);
 
-    auto F_ip1 = Eigen::Map<Eigen::MatrixXd>(
-        workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
-
     const auto x_i = Eigen::Map<const Eigen::VectorXd>(
         output.x[i], input_.dimensions.state_dim);
     auto u_i =
@@ -386,22 +430,14 @@ void LQR::solve(const double δ, Output &output) {
     auto y_ip1_prefix = Eigen::Map<Eigen::VectorXd>(
         output.y[i + 1], input_.dimensions.state_dim);
 
-    auto f_i =
+    auto f_ip1 =
         Eigen::Map<Eigen::VectorXd>(workspace_.f, input_.dimensions.state_dim);
 
     u_i.noalias() = k_i + K_i * x_i;
 
-    x_ip1.noalias() = A_i * x_i + B_i * u_i;
-    f_i.noalias() = δ * v_ip1 - c_ip1;
-    x_ip1 -= f_i;
-
-    F_ip1.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                                input_.dimensions.state_dim) +
-                      δ * V_ip1;
-    {
-      Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_ip1);
-      llt.solveInPlace(x_ip1);
-    }
+    // NOTE: We use f_ip1 as scratch memory for computing x_ip1.
+    f_ip1.noalias() = c_ip1 - δ * v_ip1 + A_i * x_i + B_i * u_i;
+    x_ip1.noalias() = F_ip1_inv * f_ip1;
 
     y_ip1_prefix.noalias() = v_ip1 + V_ip1 * x_ip1;
   }
