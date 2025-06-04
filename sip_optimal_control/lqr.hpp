@@ -79,7 +79,7 @@ public:
           (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
       const int G_inv_size = T * sizeof(double *) + T * m * m * sizeof(double);
       const int F_inv_size =
-          (T + 1) * sizeof(double *) + T * n * n * sizeof(double);
+          (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
       const int k_size = T * sizeof(double *) + T * m * sizeof(double);
       const int v_size =
           (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
