@@ -84,7 +84,7 @@ public:
       const int v_size =
           (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
       const int G_size = m * m * sizeof(double);
-      const int g_size = m * sizeof(double);
+      const int g_size = n * sizeof(double);
       const int H_size = m * n * sizeof(double);
       const int h_size = m * sizeof(double);
       const int F_size = n * n * sizeof(double);
