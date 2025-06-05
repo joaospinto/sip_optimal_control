@@ -10,7 +10,7 @@ git_override(
 )
 
 # eigen
-bazel_dep(name = "eigen", version = "4.0.0-20241125.bcr.1")
+bazel_dep(name = "eigen", version = "3.4.0.bcr.3")
 
 # Google Test
 # https://github.com/google/googletest
