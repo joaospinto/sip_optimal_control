@@ -65,16 +65,20 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
                                                input_.dimensions.control_dim);
 
     Q_i_mod.noalias() =
-        Q_i + r2_inv * jac_x_c_i.transpose() * jac_x_c_i +
-        jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_x_g_i;
+        Q_i + r1 * Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
+                                             input_.dimensions.state_dim);
+    Q_i_mod += r2_inv * jac_x_c_i.transpose() * jac_x_c_i;
+    Q_i_mod += jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_x_g_i;
 
     M_i_mod.noalias() =
         M_i + r2_inv * jac_x_c_i.transpose() * jac_u_c_i +
         jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
 
     R_i_mod.noalias() =
-        R_i + r2_inv * jac_u_c_i.transpose() * jac_u_c_i +
-        jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
+        R_i + r1 * Eigen::MatrixXd::Identity(input_.dimensions.control_dim,
+                                             input_.dimensions.control_dim);
+    R_i_mod += r2_inv * jac_u_c_i.transpose() * jac_u_c_i;
+    R_i_mod += jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
   }
 
   const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
