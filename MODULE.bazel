@@ -6,11 +6,25 @@ bazel_dep(name = "sip")
 git_override(
     module_name = "sip",
     remote = "https://github.com/joaospinto/sip.git",
-    commit = "3aba9bd2664f138e1feb7f4bb53ae791a79bab5d",
+    commit = "0825e1f244a21cf1f8efa8ade235f9ef5f7142f0",
 )
 
 # eigen
 bazel_dep(name = "eigen", version = "3.4.0.bcr.3")
+
+# rules_cc
+bazel_dep(name = "rules_cc", version = "0.2.17")
+
+# Hermetic C++ Toolchain (Zig CC)
+bazel_dep(name = "hermetic_cc_toolchain", version = "4.1.0")
+
+toolchains = use_extension("@hermetic_cc_toolchain//toolchain:ext.bzl", "toolchains")
+use_repo(toolchains, "zig_sdk")
+
+register_toolchains(
+    "@zig_sdk//toolchain/...",
+    "@zig_sdk//libc_aware/toolchain/...",
+)
 
 # Hedron's Compile Commands Extractor for Bazel
 # https://github.com/hedronvision/bazel-compile-commands-extractor
