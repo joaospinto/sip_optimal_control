@@ -159,20 +159,22 @@ struct Workspace {
     double **q_mod;
     double **r_mod;
     double **c_mod;
-    double r2;
-    double r2_inv;
+    double **dyn_r2;
+    double **c_r2_inv;
 
     // To dynamically allocate the required memory.
-    void reserve(int state_dim, int control_dim, int num_stages, int g_dim);
+    void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
+                 int g_dim);
     void free(int num_stages);
 
     // For using pre-allocated (possibly statically allocated) memory.
-    auto mem_assign(int state_dim, int control_dim, int num_stages, int g_dim,
-                    unsigned char *mem_ptr) -> int;
+    auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
+                    int g_dim, unsigned char *mem_ptr) -> int;
 
     // For knowing how much memory to pre-allocate.
     static constexpr auto num_bytes(int state_dim, int control_dim,
-                                    int num_stages, int g_dim) -> int {
+                                    int num_stages, int c_dim, int g_dim)
+        -> int {
       const int T = num_stages;
       const int n = state_dim;
       const int m = control_dim;
@@ -188,9 +190,13 @@ struct Workspace {
       const int r_mod_size = T * sizeof(double *) + T * m * sizeof(double);
       const int c_mod_size =
           (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
+      const int dyn_r2_size =
+          (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
+      const int c_r2_inv_size =
+          (T + 1) * sizeof(double *) + (T + 1) * c_dim * sizeof(double);
 
       return mod_w_inv_size + Q_mod_size + M_mod_size + R_mod_size +
-             q_mod_size + r_mod_size + c_mod_size;
+             q_mod_size + r_mod_size + c_mod_size + dyn_r2_size + c_r2_inv_size;
     }
   };
 
@@ -216,7 +222,7 @@ struct Workspace {
            LQR::Workspace::num_bytes(state_dim, control_dim, num_stages) +
            LQR::Output::num_bytes(num_stages) +
            RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
-                                         g_dim) +
+                                         c_dim, g_dim) +
            sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
   }
 

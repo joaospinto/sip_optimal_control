@@ -9,19 +9,28 @@ namespace sip::optimal_control {
 CallbackProvider::CallbackProvider(const Input &input, Workspace &workspace)
     : input_(input), workspace_(workspace) {}
 
-bool CallbackProvider::factor(const double *w, const double r1, const double r2,
-                              const double r3) {
+bool CallbackProvider::factor(const double *w, const double r1,
+                              const double *r2, const double *r3) {
   const auto &mco = workspace_.model_callback_output;
   auto &lqr_data = workspace_.regularized_lqr_data;
 
   int w_offset = 0;
+  int y_offset = 0;
 
-  if (r2 <= 0.0) {
-    return false;
+  for (int i = 0; i <= input_.dimensions.num_stages; ++i) {
+    for (int j = 0; j < input_.dimensions.state_dim; ++j) {
+      if (r2[y_offset] <= 0.0) {
+        return false;
+      }
+      lqr_data.dyn_r2[i][j] = r2[y_offset++];
+    }
+    for (int j = 0; j < input_.dimensions.c_dim; ++j) {
+      if (r2[y_offset] <= 0.0) {
+        return false;
+      }
+      lqr_data.c_r2_inv[i][j] = 1.0 / r2[y_offset++];
+    }
   }
-  lqr_data.r2 = r2;
-  const double r2_inv = 1.0 / r2;
-  lqr_data.r2_inv = r2_inv;
 
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto Q_i = Eigen::Map<const Eigen::MatrixXd>(
@@ -50,9 +59,12 @@ bool CallbackProvider::factor(const double *w, const double r1, const double r2,
 
     auto mod_w_inv_i = Eigen::Map<Eigen::VectorXd>(lqr_data.mod_w_inv[i],
                                                    input_.dimensions.g_dim);
+    const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
+        lqr_data.c_r2_inv[i], input_.dimensions.c_dim);
 
     for (int j = 0; j < input_.dimensions.g_dim; ++j) {
-      const double w_reg = w[w_offset++] + r3;
+      const double w_reg = w[w_offset] + r3[w_offset];
+      ++w_offset;
       if (w_reg <= 0.0) {
         return false;
       }
@@ -74,17 +86,17 @@ bool CallbackProvider::factor(const double *w, const double r1, const double r2,
     Q_i_mod.noalias() =
         Q_i + r1 * Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
                                              input_.dimensions.state_dim);
-    Q_i_mod += r2_inv * jac_x_c_i.transpose() * jac_x_c_i;
+    Q_i_mod += jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_x_c_i;
     Q_i_mod += jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_x_g_i;
 
     M_i_mod.noalias() =
-        M_i + r2_inv * jac_x_c_i.transpose() * jac_u_c_i +
+        M_i + jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_u_c_i +
         jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
 
     R_i_mod.noalias() =
         R_i + r1 * Eigen::MatrixXd::Identity(input_.dimensions.control_dim,
                                              input_.dimensions.control_dim);
-    R_i_mod += r2_inv * jac_u_c_i.transpose() * jac_u_c_i;
+    R_i_mod += jac_u_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_u_c_i;
     R_i_mod += jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
   }
 
@@ -103,9 +115,12 @@ bool CallbackProvider::factor(const double *w, const double r1, const double r2,
   auto mod_w_inv_N = Eigen::Map<Eigen::VectorXd>(
       lqr_data.mod_w_inv[input_.dimensions.num_stages],
       input_.dimensions.g_dim);
+  const auto c_r2_inv_N = Eigen::Map<const Eigen::VectorXd>(
+      lqr_data.c_r2_inv[input_.dimensions.num_stages], input_.dimensions.c_dim);
 
   for (int j = 0; j < input_.dimensions.g_dim; ++j) {
-    const double w_reg = w[w_offset++] + r3;
+    const double w_reg = w[w_offset] + r3[w_offset];
+    ++w_offset;
     if (w_reg <= 0.0) {
       return false;
     }
@@ -119,7 +134,7 @@ bool CallbackProvider::factor(const double *w, const double r1, const double r2,
   Q_N_mod.noalias() =
       Q_N + r1 * Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
                                            input_.dimensions.state_dim);
-  Q_N_mod += r2_inv * jac_x_c_N.transpose() * jac_x_c_N;
+  Q_N_mod += jac_x_c_N.transpose() * c_r2_inv_N.asDiagonal() * jac_x_c_N;
   Q_N_mod += jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * jac_x_g_N;
 
   lqr_input_.Q = lqr_data.Q_mod;
@@ -127,21 +142,19 @@ bool CallbackProvider::factor(const double *w, const double r1, const double r2,
   lqr_input_.R = lqr_data.R_mod;
   lqr_input_.A = mco.ddyn_dx;
   lqr_input_.B = mco.ddyn_du;
+  lqr_input_.delta = lqr_data.dyn_r2;
   lqr_input_.dimensions = {
       .state_dim = input_.dimensions.state_dim,
       .control_dim = input_.dimensions.control_dim,
       .num_stages = input_.dimensions.num_stages,
   };
   auto lqr_solver = LQR(lqr_input_, workspace_.lqr_workspace);
-  return lqr_solver.factor(r2);
+  return lqr_solver.factor();
 }
 
 void CallbackProvider::solve(const double *b, double *sol) {
   const int x_dim = input_.dimensions.get_x_dim();
   const int y_dim = input_.dimensions.get_y_dim();
-
-  const double r2 = workspace_.regularized_lqr_data.r2;
-  const double r2_inv = workspace_.regularized_lqr_data.r2_inv;
 
   {
     const double *b_x = b;
@@ -188,6 +201,8 @@ void CallbackProvider::solve(const double *b, double *sol) {
       const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
           workspace_.regularized_lqr_data.mod_w_inv[i],
           input_.dimensions.g_dim);
+      const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
+          workspace_.regularized_lqr_data.c_r2_inv[i], input_.dimensions.c_dim);
 
       auto q_i_mod =
           Eigen::Map<Eigen::VectorXd>(workspace_.regularized_lqr_data.q_mod[i],
@@ -202,11 +217,13 @@ void CallbackProvider::solve(const double *b, double *sol) {
                                       input_.dimensions.control_dim);
 
       q_i_mod.noalias() =
-          -(b_x_i + r2_inv * jac_x_c_i.transpose() * b_y_i_suffix +
+          -(b_x_i +
+            jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * b_y_i_suffix +
             jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * b_z_i);
 
       r_i_mod.noalias() =
-          -(b_u_i + r2_inv * jac_u_c_i.transpose() * b_y_i_suffix +
+          -(b_u_i +
+            jac_u_c_i.transpose() * c_r2_inv_i.asDiagonal() * b_y_i_suffix +
             jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * b_z_i);
 
       c_i_mod.noalias() = -b_y_i_prefix;
@@ -223,6 +240,9 @@ void CallbackProvider::solve(const double *b, double *sol) {
     const auto mod_w_inv_N = Eigen::Map<const Eigen::VectorXd>(
         workspace_.regularized_lqr_data.mod_w_inv[input_.dimensions.num_stages],
         input_.dimensions.g_dim);
+    const auto c_r2_inv_N = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.c_r2_inv[input_.dimensions.num_stages],
+        input_.dimensions.c_dim);
 
     const auto b_x_N =
         Eigen::Map<const Eigen::VectorXd>(b_x, input_.dimensions.state_dim);
@@ -245,9 +265,9 @@ void CallbackProvider::solve(const double *b, double *sol) {
         workspace_.regularized_lqr_data.c_mod[input_.dimensions.num_stages],
         input_.dimensions.state_dim);
 
-    q_N_mod.noalias() =
-        -(b_x_N + r2_inv * jac_x_c_N.transpose() * b_y_N_suffix +
-          jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * b_z_N);
+    q_N_mod.noalias() = -(
+        b_x_N + jac_x_c_N.transpose() * c_r2_inv_N.asDiagonal() * b_y_N_suffix +
+        jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * b_z_N);
 
     c_N_mod = -b_y_N_prefix;
   }
@@ -276,7 +296,7 @@ void CallbackProvider::solve(const double *b, double *sol) {
   }
 
   auto lqr_solver = LQR(lqr_input_, workspace_.lqr_workspace);
-  lqr_solver.solve(r2, lqr_output);
+  lqr_solver.solve(lqr_output);
 
   const double *b_y = b + x_dim;
   const double *b_z = b_y + y_dim;
@@ -307,6 +327,8 @@ void CallbackProvider::solve(const double *b, double *sol) {
 
     const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
         workspace_.regularized_lqr_data.mod_w_inv[i], input_.dimensions.g_dim);
+    const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.c_r2_inv[i], input_.dimensions.c_dim);
 
     const auto b_y_i_suffix =
         Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.c_dim);
@@ -331,8 +353,8 @@ void CallbackProvider::solve(const double *b, double *sol) {
     auto z_i = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
     z += input_.dimensions.g_dim;
 
-    y_i_suffix.noalias() =
-        r2_inv * (jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix);
+    y_i_suffix.noalias() = c_r2_inv_i.asDiagonal() *
+                           (jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix);
 
     z_i.noalias() =
         mod_w_inv_i.asDiagonal() * (jac_x_g_i * x_i + jac_u_g_i * u_i - b_z_i);
@@ -358,16 +380,20 @@ void CallbackProvider::solve(const double *b, double *sol) {
   const auto mod_w_inv_N = Eigen::Map<const Eigen::VectorXd>(
       workspace_.regularized_lqr_data.mod_w_inv[input_.dimensions.num_stages],
       input_.dimensions.g_dim);
+  const auto c_r2_inv_N = Eigen::Map<const Eigen::VectorXd>(
+      workspace_.regularized_lqr_data.c_r2_inv[input_.dimensions.num_stages],
+      input_.dimensions.c_dim);
 
   auto y_N_suffix = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.c_dim);
-  y_N_suffix.noalias() = r2_inv * (jac_x_c_N * x_N - b_y_N_suffix);
+  y_N_suffix.noalias() =
+      c_r2_inv_N.asDiagonal() * (jac_x_c_N * x_N - b_y_N_suffix);
 
   auto z_N = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
   z_N.noalias() = mod_w_inv_N.asDiagonal() * (jac_x_g_N * x_N - b_z_N);
 }
 
 void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
-                                   const double r2, const double r3,
+                                   const double *r2, const double *r3,
                                    const double *x_x, const double *x_y,
                                    const double *x_z, double *y_x, double *y_y,
                                    double *y_z) {
@@ -385,10 +411,10 @@ void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
     y_x[i] += r1 * x_x[i];
   }
   for (int i = 0; i < y_dim; ++i) {
-    y_y[i] -= r2 * x_y[i];
+    y_y[i] -= r2[i] * x_y[i];
   }
   for (int i = 0; i < z_dim; ++i) {
-    y_z[i] -= (w[i] + r3) * x_z[i];
+    y_z[i] -= (w[i] + r3[i]) * x_z[i];
   }
 }
 

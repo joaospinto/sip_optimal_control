@@ -250,7 +250,8 @@ auto ModelCallbackOutput::mem_assign(int state_dim, int control_dim,
 }
 
 void Workspace::RegularizedLQRData::reserve(int state_dim, int control_dim,
-                                            int num_stages, int g_dim) {
+                                            int num_stages, int c_dim,
+                                            int g_dim) {
 
   mod_w_inv = new double *[num_stages + 1];
   Q_mod = new double *[num_stages + 1];
@@ -259,6 +260,8 @@ void Workspace::RegularizedLQRData::reserve(int state_dim, int control_dim,
   q_mod = new double *[num_stages + 1];
   r_mod = new double *[num_stages];
   c_mod = new double *[num_stages + 1];
+  dyn_r2 = new double *[num_stages + 1];
+  c_r2_inv = new double *[num_stages + 1];
 
   for (int i = 0; i < num_stages; ++i) {
     mod_w_inv[i] = new double[g_dim];
@@ -268,12 +271,16 @@ void Workspace::RegularizedLQRData::reserve(int state_dim, int control_dim,
     q_mod[i] = new double[state_dim];
     r_mod[i] = new double[control_dim];
     c_mod[i] = new double[state_dim];
+    dyn_r2[i] = new double[state_dim];
+    c_r2_inv[i] = new double[c_dim];
   }
 
   mod_w_inv[num_stages] = new double[g_dim];
   Q_mod[num_stages] = new double[state_dim * state_dim];
   q_mod[num_stages] = new double[state_dim];
   c_mod[num_stages] = new double[state_dim];
+  dyn_r2[num_stages] = new double[state_dim];
+  c_r2_inv[num_stages] = new double[c_dim];
 }
 
 void Workspace::RegularizedLQRData::free(int num_stages) {
@@ -285,12 +292,16 @@ void Workspace::RegularizedLQRData::free(int num_stages) {
     delete[] q_mod[i];
     delete[] r_mod[i];
     delete[] c_mod[i];
+    delete[] dyn_r2[i];
+    delete[] c_r2_inv[i];
   }
 
   delete[] mod_w_inv[num_stages];
   delete[] Q_mod[num_stages];
   delete[] q_mod[num_stages];
   delete[] c_mod[num_stages];
+  delete[] dyn_r2[num_stages];
+  delete[] c_r2_inv[num_stages];
 
   delete[] mod_w_inv;
   delete[] Q_mod;
@@ -299,10 +310,13 @@ void Workspace::RegularizedLQRData::free(int num_stages) {
   delete[] q_mod;
   delete[] r_mod;
   delete[] c_mod;
+  delete[] dyn_r2;
+  delete[] c_r2_inv;
 }
 
 auto Workspace::RegularizedLQRData::mem_assign(int state_dim, int control_dim,
-                                               int num_stages, int g_dim,
+                                               int num_stages, int c_dim,
+                                               int g_dim,
                                                unsigned char *mem_ptr) -> int {
   int cum_size = 0;
 
@@ -327,6 +341,12 @@ auto Workspace::RegularizedLQRData::mem_assign(int state_dim, int control_dim,
   c_mod = reinterpret_cast<double **>(mem_ptr + cum_size);
   cum_size += (num_stages + 1) * sizeof(double *);
 
+  dyn_r2 = reinterpret_cast<double **>(mem_ptr + cum_size);
+  cum_size += (num_stages + 1) * sizeof(double *);
+
+  c_r2_inv = reinterpret_cast<double **>(mem_ptr + cum_size);
+  cum_size += (num_stages + 1) * sizeof(double *);
+
   for (int i = 0; i < num_stages; ++i) {
     mod_w_inv[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
     cum_size += g_dim * sizeof(double);
@@ -348,6 +368,12 @@ auto Workspace::RegularizedLQRData::mem_assign(int state_dim, int control_dim,
 
     c_mod[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
     cum_size += state_dim * sizeof(double);
+
+    dyn_r2[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
+    cum_size += state_dim * sizeof(double);
+
+    c_r2_inv[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
+    cum_size += c_dim * sizeof(double);
   }
 
   mod_w_inv[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
@@ -362,8 +388,14 @@ auto Workspace::RegularizedLQRData::mem_assign(int state_dim, int control_dim,
   c_mod[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += state_dim * sizeof(double);
 
+  dyn_r2[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += state_dim * sizeof(double);
+
+  c_r2_inv[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += c_dim * sizeof(double);
+
   assert(cum_size == Workspace::RegularizedLQRData::num_bytes(
-                         state_dim, control_dim, num_stages, g_dim));
+                         state_dim, control_dim, num_stages, c_dim, g_dim));
 
   return cum_size;
 }
@@ -385,7 +417,8 @@ void Workspace::reserve(int state_dim, int control_dim, int num_stages,
   lqr_workspace.reserve(state_dim, control_dim, num_stages);
   lqr_output.reserve(num_stages);
 
-  regularized_lqr_data.reserve(state_dim, control_dim, num_stages, g_dim);
+  regularized_lqr_data.reserve(state_dim, control_dim, num_stages, c_dim,
+                               g_dim);
 
   sip_workspace.reserve(x_dim, z_dim, y_dim);
 }
@@ -430,7 +463,7 @@ auto Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
   cum_size += lqr_output.mem_assign(num_stages, mem_ptr + cum_size);
 
   cum_size += regularized_lqr_data.mem_assign(
-      state_dim, control_dim, num_stages, g_dim, mem_ptr + cum_size);
+      state_dim, control_dim, num_stages, c_dim, g_dim, mem_ptr + cum_size);
 
   cum_size += sip_workspace.mem_assign(x_dim, z_dim, y_dim, mem_ptr + cum_size);
 

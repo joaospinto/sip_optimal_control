@@ -19,6 +19,7 @@ public:
     double **A;
     double **B;
     double **c;
+    double **delta;
 
     Dimensions dimensions;
   };
@@ -58,6 +59,8 @@ public:
     double *h;
     double *F;
     double *f;
+    double *sqrt_delta;
+    double *sqrt_delta_inv;
 
     // To dynamically allocate the required memory.
     void reserve(int state_dim, int control_dim, int num_stages);
@@ -89,15 +92,18 @@ public:
       const int h_size = m * sizeof(double);
       const int F_size = n * n * sizeof(double);
       const int f_size = n * sizeof(double);
+      const int sqrt_delta_size = n * sizeof(double);
+      const int sqrt_delta_inv_size = n * sizeof(double);
       return W_size + K_size + V_size + G_inv_size + F_inv_size + k_size +
-             v_size + G_size + g_size + H_size + h_size + F_size + f_size;
+             v_size + G_size + g_size + H_size + h_size + F_size + f_size +
+             sqrt_delta_size + sqrt_delta_inv_size;
     }
   };
 
   LQR(const Input &data, Workspace &workspace);
 
-  bool factor(const double δ);
-  void solve(const double δ, Output &output);
+  bool factor();
+  void solve(Output &output);
 
 private:
   const Input &input_;

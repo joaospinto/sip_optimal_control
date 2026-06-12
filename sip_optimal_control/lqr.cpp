@@ -4,6 +4,7 @@
 
 #include <Eigen/Dense>
 #include <cassert>
+#include <cmath>
 
 namespace sip::optimal_control {
 
@@ -65,6 +66,8 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
   h = new double[control_dim];
   F = new double[state_dim * state_dim];
   f = new double[state_dim];
+  sqrt_delta = new double[state_dim];
+  sqrt_delta_inv = new double[state_dim];
 }
 
 void LQR::Workspace::free(int num_stages) {
@@ -74,6 +77,8 @@ void LQR::Workspace::free(int num_stages) {
   delete[] h;
   delete[] F;
   delete[] f;
+  delete[] sqrt_delta;
+  delete[] sqrt_delta_inv;
 
   for (int i = 0; i < num_stages; ++i) {
     delete[] W[i];
@@ -173,6 +178,12 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
   f = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += state_dim * sizeof(double);
 
+  sqrt_delta = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += state_dim * sizeof(double);
+
+  sqrt_delta_inv = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += state_dim * sizeof(double);
+
   assert(cum_size ==
          LQR::Workspace::num_bytes(state_dim, control_dim, num_stages));
 
@@ -182,7 +193,52 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
 LQR::LQR(const LQR::Input &input, LQR::Workspace &workspace)
     : input_(input), workspace_(workspace) {}
 
-bool LQR::factor(const double δ) {
+namespace {
+
+bool compute_regularized_inverse(const double *delta_data,
+                                 const Eigen::Ref<const Eigen::MatrixXd> &V,
+                                 double *F_data, double *F_inv_data,
+                                 double *sqrt_delta_data,
+                                 double *sqrt_delta_inv_data, const int n) {
+  auto F = Eigen::Map<Eigen::MatrixXd>(F_data, n, n);
+  auto F_inv = Eigen::Map<Eigen::MatrixXd>(F_inv_data, n, n);
+
+  for (int i = 0; i < n; ++i) {
+    if (delta_data[i] <= 0.0) {
+      return false;
+    }
+    sqrt_delta_data[i] = std::sqrt(delta_data[i]);
+    sqrt_delta_inv_data[i] = 1.0 / sqrt_delta_data[i];
+  }
+
+  for (int col = 0; col < n; ++col) {
+    for (int row = 0; row < n; ++row) {
+      F(row, col) = sqrt_delta_data[row] * V(row, col) * sqrt_delta_data[col];
+    }
+    F(col, col) += 1.0;
+  }
+
+  F_inv.setIdentity();
+  {
+    Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F);
+    if (llt.info() != Eigen::Success) {
+      return false;
+    }
+    llt.solveInPlace(F_inv);
+  }
+
+  for (int col = 0; col < n; ++col) {
+    for (int row = 0; row < n; ++row) {
+      F_inv(row, col) *= sqrt_delta_data[row] * sqrt_delta_inv_data[col];
+    }
+  }
+
+  return true;
+}
+
+} // namespace
+
+bool LQR::factor() {
   const auto Q_N = Eigen::Map<const Eigen::MatrixXd>(
       input_.Q[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
@@ -191,26 +247,13 @@ bool LQR::factor(const double δ) {
       workspace_.V[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
 
-  auto F_N = Eigen::Map<Eigen::MatrixXd>(
-      workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
-
-  auto F_N_inv = Eigen::Map<Eigen::MatrixXd>(
-      workspace_.F_inv[input_.dimensions.num_stages],
-      input_.dimensions.state_dim, input_.dimensions.state_dim);
-
   V_N.noalias() = Q_N;
 
-  F_N.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                            input_.dimensions.state_dim) +
-                  δ * V_N;
-
-  F_N_inv.setIdentity();
-  {
-    Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_N);
-    if (llt.info() != Eigen::Success) {
-      return false;
-    }
-    llt.solveInPlace(F_N_inv);
+  if (!compute_regularized_inverse(
+          input_.delta[input_.dimensions.num_stages], V_N, workspace_.F,
+          workspace_.F_inv[input_.dimensions.num_stages], workspace_.sqrt_delta,
+          workspace_.sqrt_delta_inv, input_.dimensions.state_dim)) {
+    return false;
   }
 
   for (int i = input_.dimensions.num_stages - 1; i >= 0; --i) {
@@ -251,10 +294,6 @@ bool LQR::factor(const double δ) {
     auto G_i_inv = Eigen::Map<Eigen::MatrixXd>(workspace_.G_inv[i],
                                                input_.dimensions.control_dim,
                                                input_.dimensions.control_dim);
-
-    auto F_i_inv = Eigen::Map<Eigen::MatrixXd>(workspace_.F_inv[i],
-                                               input_.dimensions.state_dim,
-                                               input_.dimensions.state_dim);
 
     auto H_i =
         Eigen::Map<Eigen::MatrixXd>(workspace_.H, input_.dimensions.control_dim,
@@ -299,23 +338,18 @@ bool LQR::factor(const double δ) {
     F_i.noalias() = Q_i + K_i.transpose() * H_i;
     V_i += F_i;
 
-    F_i.noalias() = Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                              input_.dimensions.state_dim) +
-                    δ * V_i;
-    F_i_inv.setIdentity();
-    {
-      Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_i);
-      if (llt.info() != Eigen::Success) {
-        return false;
-      }
-      llt.solveInPlace(F_i_inv);
+    if (!compute_regularized_inverse(input_.delta[i], V_i, workspace_.F,
+                                     workspace_.F_inv[i], workspace_.sqrt_delta,
+                                     workspace_.sqrt_delta_inv,
+                                     input_.dimensions.state_dim)) {
+      return false;
     }
   }
 
   return true;
 }
 
-void LQR::solve(const double δ, Output &output) {
+void LQR::solve(Output &output) {
   const auto q_N = Eigen::Map<const Eigen::VectorXd>(
       input_.q[input_.dimensions.num_stages], input_.dimensions.state_dim);
 
@@ -371,7 +405,10 @@ void LQR::solve(const double δ, Output &output) {
     auto f_i =
         Eigen::Map<Eigen::VectorXd>(workspace_.f, input_.dimensions.state_dim);
 
-    f_i.noalias() = δ * v_ip1 - c_ip1;
+    const auto delta_ip1 = Eigen::Map<const Eigen::VectorXd>(
+        input_.delta[i + 1], input_.dimensions.state_dim);
+
+    f_i.noalias() = delta_ip1.asDiagonal() * v_ip1 - c_ip1;
     g_i.noalias() = v_ip1 - W_i * f_i;
 
     h_i.noalias() = r_i + B_i.transpose() * g_i;
@@ -399,7 +436,10 @@ void LQR::solve(const double δ, Output &output) {
 
   auto x_0 =
       Eigen::Map<Eigen::VectorXd>(output.x[0], input_.dimensions.state_dim);
-  f_0.noalias() = δ * v_0 - c_0;
+  const auto delta_0 = Eigen::Map<const Eigen::VectorXd>(
+      input_.delta[0], input_.dimensions.state_dim);
+
+  f_0.noalias() = delta_0.asDiagonal() * v_0 - c_0;
   x_0.noalias() = -F_0_inv * f_0;
 
   auto y_0 =
@@ -448,7 +488,11 @@ void LQR::solve(const double δ, Output &output) {
     u_i.noalias() = k_i + K_i * x_i;
 
     // NOTE: We use f_ip1 as scratch memory for computing x_ip1.
-    f_ip1.noalias() = c_ip1 - δ * v_ip1 + A_i * x_i + B_i * u_i;
+    const auto delta_ip1 = Eigen::Map<const Eigen::VectorXd>(
+        input_.delta[i + 1], input_.dimensions.state_dim);
+
+    f_ip1.noalias() =
+        c_ip1 - delta_ip1.asDiagonal() * v_ip1 + A_i * x_i + B_i * u_i;
     x_ip1.noalias() = F_ip1_inv * f_ip1;
 
     y_ip1_prefix.noalias() = v_ip1 + V_ip1 * x_ip1;
