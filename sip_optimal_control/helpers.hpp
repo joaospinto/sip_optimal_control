@@ -8,7 +8,7 @@ class CallbackProvider {
 public:
   CallbackProvider(const Input &input, Workspace &workspace);
 
-  void factor(const double *w, const double r1, const double r2,
+  bool factor(const double *w, const double r1, const double r2,
               const double r3);
   void solve(const double *b, double *sol);
   void add_Kx_to_y(const double *w, const double r1, const double r2,

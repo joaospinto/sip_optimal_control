@@ -182,7 +182,7 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
 LQR::LQR(const LQR::Input &input, LQR::Workspace &workspace)
     : input_(input), workspace_(workspace) {}
 
-void LQR::factor(const double δ) {
+bool LQR::factor(const double δ) {
   const auto Q_N = Eigen::Map<const Eigen::MatrixXd>(
       input_.Q[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
@@ -207,6 +207,9 @@ void LQR::factor(const double δ) {
   F_N_inv.setIdentity();
   {
     Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_N);
+    if (llt.info() != Eigen::Success) {
+      return false;
+    }
     llt.solveInPlace(F_N_inv);
   }
 
@@ -277,6 +280,9 @@ void LQR::factor(const double δ) {
     G_i_inv.setIdentity();
     {
       Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(G_i);
+      if (llt.info() != Eigen::Success) {
+        return false;
+      }
       llt.solveInPlace(G_i_inv);
     }
 
@@ -299,9 +305,14 @@ void LQR::factor(const double δ) {
     F_i_inv.setIdentity();
     {
       Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_i);
+      if (llt.info() != Eigen::Success) {
+        return false;
+      }
       llt.solveInPlace(F_i_inv);
     }
   }
+
+  return true;
 }
 
 void LQR::solve(const double δ, Output &output) {

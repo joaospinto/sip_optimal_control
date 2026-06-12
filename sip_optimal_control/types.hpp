@@ -68,8 +68,9 @@ struct ModelCallbackOutput {
   double **d2L_dxdu;
   // The second derivative of the Lagrangian with respect to controls.
   double **d2L_du2;
-  // NOTE: d2L should be positive semi-definite and
-  // d2L_du2 should be positive definite.
+  // The user should provide the true Lagrangian Hessian blocks. SIP applies
+  // primal regularization and retries factorization when the Riccati pivots do
+  // not certify the desired Newton-KKT inertia.
 
   // To dynamically allocate the required memory.
   void reserve(int state_dim, int control_dim, int num_stages, int c_dim,

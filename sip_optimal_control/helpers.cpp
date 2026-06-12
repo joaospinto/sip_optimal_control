@@ -9,13 +9,16 @@ namespace sip::optimal_control {
 CallbackProvider::CallbackProvider(const Input &input, Workspace &workspace)
     : input_(input), workspace_(workspace) {}
 
-void CallbackProvider::factor(const double *w, const double r1, const double r2,
+bool CallbackProvider::factor(const double *w, const double r1, const double r2,
                               const double r3) {
   const auto &mco = workspace_.model_callback_output;
   auto &lqr_data = workspace_.regularized_lqr_data;
 
   int w_offset = 0;
 
+  if (r2 <= 0.0) {
+    return false;
+  }
   lqr_data.r2 = r2;
   const double r2_inv = 1.0 / r2;
   lqr_data.r2_inv = r2_inv;
@@ -49,7 +52,11 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
                                                    input_.dimensions.g_dim);
 
     for (int j = 0; j < input_.dimensions.g_dim; ++j) {
-      mod_w_inv_i(j) = 1.0 / (w[w_offset++] + r3);
+      const double w_reg = w[w_offset++] + r3;
+      if (w_reg <= 0.0) {
+        return false;
+      }
+      mod_w_inv_i(j) = 1.0 / w_reg;
     }
 
     auto Q_i_mod = Eigen::Map<Eigen::MatrixXd>(lqr_data.Q_mod[i],
@@ -98,7 +105,11 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
       input_.dimensions.g_dim);
 
   for (int j = 0; j < input_.dimensions.g_dim; ++j) {
-    mod_w_inv_N(j) = 1.0 / (w[w_offset++] + r3);
+    const double w_reg = w[w_offset++] + r3;
+    if (w_reg <= 0.0) {
+      return false;
+    }
+    mod_w_inv_N(j) = 1.0 / w_reg;
   }
 
   auto Q_N_mod = Eigen::Map<Eigen::MatrixXd>(
@@ -122,7 +133,7 @@ void CallbackProvider::factor(const double *w, const double r1, const double r2,
       .num_stages = input_.dimensions.num_stages,
   };
   auto lqr_solver = LQR(lqr_input_, workspace_.lqr_workspace);
-  lqr_solver.factor(r2);
+  return lqr_solver.factor(r2);
 }
 
 void CallbackProvider::solve(const double *b, double *sol) {

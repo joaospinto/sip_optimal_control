@@ -91,8 +91,8 @@ auto solve(const Input &input, const ::sip::Settings &settings,
 
   const auto factor = [&callback_provider](const double *w, const double r1,
                                            const double r2,
-                                           const double r3) -> void {
-    callback_provider.factor(w, r1, r2, r3);
+                                           const double r3) -> bool {
+    return callback_provider.factor(w, r1, r2, r3);
   };
 
   const auto solve = [&callback_provider](const double *b, double *v) -> void {

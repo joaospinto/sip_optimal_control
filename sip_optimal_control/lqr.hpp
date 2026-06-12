@@ -96,7 +96,7 @@ public:
 
   LQR(const Input &data, Workspace &workspace);
 
-  void factor(const double δ);
+  bool factor(const double δ);
   void solve(const double δ, Output &output);
 
 private:
