@@ -3,11 +3,58 @@
 #define EIGEN_NO_MALLOC
 
 #include <Eigen/Dense>
+#include <algorithm>
 
 namespace sip::optimal_control {
 
 CallbackProvider::CallbackProvider(const Input &input, Workspace &workspace)
     : input_(input), workspace_(workspace) {}
+
+void CallbackProvider::form_theta_jacobian() {
+  const auto &dim = input_.dimensions;
+  const auto &mco = workspace_.model_callback_output;
+  auto &lqr_data = workspace_.regularized_lqr_data;
+
+  const int p = dim.theta_dim;
+  const int stagewise_kkt_dim = dim.get_stagewise_kkt_dim();
+  auto J_theta =
+      Eigen::Map<Eigen::MatrixXd>(lqr_data.theta_jacobian, stagewise_kkt_dim, p);
+  J_theta.setZero();
+
+  int row = 0;
+  for (int i = 0; i < dim.num_stages; ++i) {
+    J_theta.block(row, 0, dim.state_dim, p) =
+        Eigen::Map<const Eigen::MatrixXd>(mco.d2L_dxdtheta[i], dim.state_dim,
+                                          p);
+    row += dim.state_dim;
+    J_theta.block(row, 0, dim.control_dim, p) =
+        Eigen::Map<const Eigen::MatrixXd>(mco.d2L_dudtheta[i], dim.control_dim,
+                                          p);
+    row += dim.control_dim;
+  }
+  J_theta.block(row, 0, dim.state_dim, p) = Eigen::Map<const Eigen::MatrixXd>(
+      mco.d2L_dxdtheta[dim.num_stages], dim.state_dim, p);
+  row += dim.state_dim;
+
+  row += dim.state_dim;
+  J_theta.block(row, 0, dim.c_dim, p) =
+      Eigen::Map<const Eigen::MatrixXd>(mco.dc_dtheta[0], dim.c_dim, p);
+  row += dim.c_dim;
+  for (int i = 0; i < dim.num_stages; ++i) {
+    J_theta.block(row, 0, dim.state_dim, p) =
+        Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_dtheta[i], dim.state_dim, p);
+    row += dim.state_dim;
+    J_theta.block(row, 0, dim.c_dim, p) = Eigen::Map<const Eigen::MatrixXd>(
+        mco.dc_dtheta[i + 1], dim.c_dim, p);
+    row += dim.c_dim;
+  }
+
+  for (int i = 0; i <= dim.num_stages; ++i) {
+    J_theta.block(row, 0, dim.g_dim, p) =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dg_dtheta[i], dim.g_dim, p);
+    row += dim.g_dim;
+  }
+}
 
 bool CallbackProvider::factor(const double *w, const double r1,
                               const double *r2, const double *r3) {
@@ -149,11 +196,46 @@ bool CallbackProvider::factor(const double *w, const double r1,
       .num_stages = input_.dimensions.num_stages,
   };
   auto lqr_solver = LQR(lqr_input_, workspace_.lqr_workspace);
-  return lqr_solver.factor();
+  if (!lqr_solver.factor()) {
+    return false;
+  }
+
+  if (input_.dimensions.theta_dim == 0) {
+    return true;
+  }
+
+  form_theta_jacobian();
+
+  auto &theta_data = workspace_.regularized_lqr_data;
+  const int p = input_.dimensions.theta_dim;
+  const int stagewise_kkt_dim = input_.dimensions.get_stagewise_kkt_dim();
+
+  const auto J_theta = Eigen::Map<const Eigen::MatrixXd>(
+      theta_data.theta_jacobian, stagewise_kkt_dim, p);
+  auto K_inv_J_theta = Eigen::Map<Eigen::MatrixXd>(
+      theta_data.theta_solution, stagewise_kkt_dim, p);
+
+  for (int j = 0; j < p; ++j) {
+    solve_stagewise_kkt(J_theta.col(j).data(), K_inv_J_theta.col(j).data());
+  }
+
+  const auto H_theta_theta = Eigen::Map<const Eigen::MatrixXd>(
+      mco.d2L_dtheta2, input_.dimensions.theta_dim, input_.dimensions.theta_dim);
+  auto S_theta =
+      Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur, p, p);
+  S_theta.noalias() =
+      H_theta_theta + r1 * Eigen::MatrixXd::Identity(p, p);
+  S_theta.noalias() -= J_theta.transpose() * K_inv_J_theta;
+
+  auto S_theta_factor =
+      Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur_factor, p, p);
+  S_theta_factor = S_theta;
+  Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(S_theta_factor);
+  return llt.info() == Eigen::Success;
 }
 
-void CallbackProvider::solve(const double *b, double *sol) {
-  const int x_dim = input_.dimensions.get_x_dim();
+void CallbackProvider::solve_stagewise_kkt(const double *b, double *sol) {
+  const int x_dim = input_.dimensions.get_stagewise_x_dim();
   const int y_dim = input_.dimensions.get_y_dim();
 
   {
@@ -277,7 +359,7 @@ void CallbackProvider::solve(const double *b, double *sol) {
 
   {
     double *sol_x = sol;
-    double *sol_y = sol_x + input_.dimensions.get_x_dim();
+    double *sol_y = sol_x + x_dim;
 
     lqr_input_.q = lqr_data.q_mod;
     lqr_input_.r = lqr_data.r_mod;
@@ -392,6 +474,70 @@ void CallbackProvider::solve(const double *b, double *sol) {
   z_N.noalias() = mod_w_inv_N.asDiagonal() * (jac_x_g_N * x_N - b_z_N);
 }
 
+void CallbackProvider::solve(const double *b, double *sol) {
+  if (input_.dimensions.theta_dim == 0) {
+    solve_stagewise_kkt(b, sol);
+    return;
+  }
+
+  auto &theta_data = workspace_.regularized_lqr_data;
+  const int p = input_.dimensions.theta_dim;
+  const int stagewise_kkt_dim = input_.dimensions.get_stagewise_kkt_dim();
+
+  const double *b_theta = b + input_.dimensions.get_stagewise_x_dim();
+  const double *b_y = b + input_.dimensions.get_x_dim();
+  const double *b_z = b_y + input_.dimensions.get_y_dim();
+
+  double *sol_theta = sol + input_.dimensions.get_stagewise_x_dim();
+  double *sol_y = sol + input_.dimensions.get_x_dim();
+  double *sol_z = sol_y + input_.dimensions.get_y_dim();
+
+  auto stagewise_rhs = Eigen::Map<Eigen::VectorXd>(
+      theta_data.theta_stagewise_rhs, stagewise_kkt_dim);
+  std::copy_n(b, input_.dimensions.get_stagewise_x_dim(),
+              theta_data.theta_stagewise_rhs);
+  std::copy_n(b_y, input_.dimensions.get_y_dim(),
+              theta_data.theta_stagewise_rhs +
+                  input_.dimensions.get_stagewise_x_dim());
+  std::copy_n(b_z, input_.dimensions.get_z_dim(),
+              theta_data.theta_stagewise_rhs +
+                  input_.dimensions.get_stagewise_x_dim() +
+                  input_.dimensions.get_y_dim());
+
+  solve_stagewise_kkt(theta_data.theta_stagewise_rhs, sol);
+
+  const auto J_theta = Eigen::Map<const Eigen::MatrixXd>(
+      theta_data.theta_jacobian, stagewise_kkt_dim, p);
+  const auto K_inv_b =
+      Eigen::Map<const Eigen::VectorXd>(sol, stagewise_kkt_dim);
+  auto theta_rhs =
+      Eigen::Map<Eigen::VectorXd>(theta_data.theta_rhs, p);
+  theta_rhs.noalias() = Eigen::Map<const Eigen::VectorXd>(b_theta, p) -
+                        J_theta.transpose() * K_inv_b;
+
+  auto S_theta_factor =
+      Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur_factor, p, p);
+  const auto S_theta =
+      Eigen::Map<const Eigen::MatrixXd>(theta_data.theta_schur, p, p);
+  S_theta_factor = S_theta;
+  Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(S_theta_factor);
+  llt.solveInPlace(theta_rhs);
+  std::copy_n(theta_data.theta_rhs, p, sol_theta);
+
+  stagewise_rhs.noalias() -= J_theta * theta_rhs;
+
+  solve_stagewise_kkt(theta_data.theta_stagewise_rhs, sol);
+
+  const int stagewise_x_dim = input_.dimensions.get_stagewise_x_dim();
+  std::copy_backward(sol + stagewise_x_dim + input_.dimensions.get_y_dim(),
+                     sol + stagewise_kkt_dim,
+                     sol_z + input_.dimensions.get_z_dim());
+  std::copy_backward(sol + stagewise_x_dim,
+                     sol + stagewise_x_dim + input_.dimensions.get_y_dim(),
+                     sol_y + input_.dimensions.get_y_dim());
+  std::copy_n(theta_data.theta_rhs, p, sol_theta);
+}
+
 void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
                                    const double *r2, const double *r3,
                                    const double *x_x, const double *x_y,
@@ -419,6 +565,9 @@ void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
 }
 
 void CallbackProvider::add_Hx_to_y(const double *x, double *y) {
+  const double *x_begin = x;
+  double *y_begin = y;
+
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto Q_i = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.d2L_dx2[i],
@@ -460,9 +609,67 @@ void CallbackProvider::add_Hx_to_y(const double *x, double *y) {
   auto y_N_x = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.state_dim);
 
   y_N_x += Q_N * x_N;
+
+  if (input_.dimensions.theta_dim == 0) {
+    return;
+  }
+
+  const int p = input_.dimensions.theta_dim;
+  const int stagewise_x_dim = input_.dimensions.get_stagewise_x_dim();
+  const auto theta =
+      Eigen::Map<const Eigen::VectorXd>(x_begin + stagewise_x_dim, p);
+  auto y_theta = Eigen::Map<Eigen::VectorXd>(y_begin + stagewise_x_dim, p);
+
+  const double *x_stage = x_begin;
+  double *y_stage = y_begin;
+  for (int i = 0; i < input_.dimensions.num_stages; ++i) {
+    const auto H_x_theta_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.d2L_dxdtheta[i],
+        input_.dimensions.state_dim, p);
+    const auto H_u_theta_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.d2L_dudtheta[i],
+        input_.dimensions.control_dim, p);
+
+    const auto x_i =
+        Eigen::Map<const Eigen::VectorXd>(x_stage, input_.dimensions.state_dim);
+    x_stage += input_.dimensions.state_dim;
+    const auto u_i = Eigen::Map<const Eigen::VectorXd>(
+        x_stage, input_.dimensions.control_dim);
+    x_stage += input_.dimensions.control_dim;
+
+    auto y_i_x =
+        Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.state_dim);
+    y_stage += input_.dimensions.state_dim;
+    auto y_i_u =
+        Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.control_dim);
+    y_stage += input_.dimensions.control_dim;
+
+    y_i_x.noalias() += H_x_theta_i * theta;
+    y_i_u.noalias() += H_u_theta_i * theta;
+    y_theta.noalias() +=
+        H_x_theta_i.transpose() * x_i + H_u_theta_i.transpose() * u_i;
+  }
+
+  const auto H_x_theta_N = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.d2L_dxdtheta
+          [input_.dimensions.num_stages],
+      input_.dimensions.state_dim, p);
+  const auto H_theta_theta = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.d2L_dtheta2, p, p);
+  const auto x_N_theta =
+      Eigen::Map<const Eigen::VectorXd>(x_stage, input_.dimensions.state_dim);
+  auto y_N_theta =
+      Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.state_dim);
+
+  y_N_theta.noalias() += H_x_theta_N * theta;
+  y_theta.noalias() += H_x_theta_N.transpose() * x_N_theta;
+  y_theta.noalias() += H_theta_theta * theta;
 }
 
 void CallbackProvider::add_Cx_to_y(const double *x, double *y) {
+  const double *x_begin = x;
+  double *y_begin = y;
+
   const auto x_0_x =
       Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.state_dim);
 
@@ -520,9 +727,47 @@ void CallbackProvider::add_Cx_to_y(const double *x, double *y) {
   auto y_N_suffix = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.c_dim);
 
   y_N_suffix += jac_x_c_N * x_N;
+
+  if (input_.dimensions.theta_dim == 0) {
+    return;
+  }
+
+  const int p = input_.dimensions.theta_dim;
+  const auto theta = Eigen::Map<const Eigen::VectorXd>(
+      x_begin + input_.dimensions.get_stagewise_x_dim(), p);
+  double *y_stage = y_begin + input_.dimensions.state_dim;
+
+  auto y_0_suffix =
+      Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.c_dim);
+  y_stage += input_.dimensions.c_dim;
+  const auto c_theta_0 = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.dc_dtheta[0], input_.dimensions.c_dim,
+      p);
+  y_0_suffix.noalias() += c_theta_0 * theta;
+
+  for (int i = 0; i < input_.dimensions.num_stages; ++i) {
+    auto y_ip1_prefix =
+        Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.state_dim);
+    y_stage += input_.dimensions.state_dim;
+    auto y_ip1_suffix =
+        Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.c_dim);
+    y_stage += input_.dimensions.c_dim;
+
+    const auto dyn_theta_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.ddyn_dtheta[i],
+        input_.dimensions.state_dim, p);
+    const auto c_theta_ip1 = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dc_dtheta[i + 1],
+        input_.dimensions.c_dim, p);
+    y_ip1_prefix.noalias() += dyn_theta_i * theta;
+    y_ip1_suffix.noalias() += c_theta_ip1 * theta;
+  }
 }
 
 void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
+  const double *x_begin = x;
+  double *y_begin = y;
+
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto A_i = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.ddyn_dx[i],
@@ -575,9 +820,47 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
   auto y_N_x = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.state_dim);
 
   y_N_x += -x_N + jac_x_c_N.transpose() * c_N;
+
+  if (input_.dimensions.theta_dim == 0) {
+    return;
+  }
+
+  const int p = input_.dimensions.theta_dim;
+  auto y_theta = Eigen::Map<Eigen::VectorXd>(
+      y_begin + input_.dimensions.get_stagewise_x_dim(), p);
+  const double *x_stage = x_begin + input_.dimensions.state_dim;
+
+  const auto c_0 =
+      Eigen::Map<const Eigen::VectorXd>(x_stage, input_.dimensions.c_dim);
+  x_stage += input_.dimensions.c_dim;
+  const auto c_theta_0 = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.dc_dtheta[0], input_.dimensions.c_dim,
+      p);
+  y_theta.noalias() += c_theta_0.transpose() * c_0;
+
+  for (int i = 0; i < input_.dimensions.num_stages; ++i) {
+    const auto dyn_ip1 =
+        Eigen::Map<const Eigen::VectorXd>(x_stage, input_.dimensions.state_dim);
+    x_stage += input_.dimensions.state_dim;
+    const auto c_ip1 =
+        Eigen::Map<const Eigen::VectorXd>(x_stage, input_.dimensions.c_dim);
+    x_stage += input_.dimensions.c_dim;
+
+    const auto dyn_theta_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.ddyn_dtheta[i],
+        input_.dimensions.state_dim, p);
+    const auto c_theta_ip1 = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dc_dtheta[i + 1],
+        input_.dimensions.c_dim, p);
+    y_theta.noalias() +=
+        dyn_theta_i.transpose() * dyn_ip1 + c_theta_ip1.transpose() * c_ip1;
+  }
 }
 
 void CallbackProvider::add_Gx_to_y(const double *x, double *y) {
+  const double *x_begin = x;
+  double *y_begin = y;
+
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dg_dx[i], input_.dimensions.g_dim,
@@ -611,9 +894,29 @@ void CallbackProvider::add_Gx_to_y(const double *x, double *y) {
   auto y_N = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.g_dim);
 
   y_N += jac_x_g_N * x_N;
+
+  if (input_.dimensions.theta_dim == 0) {
+    return;
+  }
+
+  const int p = input_.dimensions.theta_dim;
+  const auto theta = Eigen::Map<const Eigen::VectorXd>(
+      x_begin + input_.dimensions.get_stagewise_x_dim(), p);
+  double *y_stage = y_begin;
+  for (int i = 0; i <= input_.dimensions.num_stages; ++i) {
+    auto y_i = Eigen::Map<Eigen::VectorXd>(y_stage, input_.dimensions.g_dim);
+    y_stage += input_.dimensions.g_dim;
+    const auto g_theta_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dg_dtheta[i], input_.dimensions.g_dim,
+        p);
+    y_i.noalias() += g_theta_i * theta;
+  }
 }
 
 void CallbackProvider::add_GTx_to_y(const double *x, double *y) {
+  const double *x_begin = x;
+  double *y_begin = y;
+
   for (int i = 0; i < input_.dimensions.num_stages; ++i) {
     const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dg_dx[i], input_.dimensions.g_dim,
@@ -646,6 +949,24 @@ void CallbackProvider::add_GTx_to_y(const double *x, double *y) {
 
   auto y_N = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.state_dim);
   y_N += jac_x_g_N.transpose() * x_N;
+
+  if (input_.dimensions.theta_dim == 0) {
+    return;
+  }
+
+  const int p = input_.dimensions.theta_dim;
+  auto y_theta = Eigen::Map<Eigen::VectorXd>(
+      y_begin + input_.dimensions.get_stagewise_x_dim(), p);
+  const double *x_stage = x_begin;
+  for (int i = 0; i <= input_.dimensions.num_stages; ++i) {
+    const auto x_i =
+        Eigen::Map<const Eigen::VectorXd>(x_stage, input_.dimensions.g_dim);
+    x_stage += input_.dimensions.g_dim;
+    const auto g_theta_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dg_dtheta[i], input_.dimensions.g_dim,
+        p);
+    y_theta.noalias() += g_theta_i.transpose() * x_i;
+  }
 }
 
 } // namespace sip::optimal_control

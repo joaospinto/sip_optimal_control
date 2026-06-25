@@ -8,6 +8,8 @@
 namespace sip::optimal_control {
 
 struct ModelCallbackInput {
+  // The cross-stage variables, shared by all stages.
+  double *theta;
   // The states.
   double **states;
   // The controls.
@@ -39,6 +41,8 @@ struct ModelCallbackOutput {
   double **df_dx;
   // The first derivative of the cost with respect to controls.
   double **df_du;
+  // The first derivative of the cost with respect to cross-stage variables.
+  double *df_dtheta;
 
   // The dynamics residuals (x_init - x_0 and dyn_i(x_i, u_i) - x_{i+1}).
   double **dyn_res;
@@ -46,6 +50,8 @@ struct ModelCallbackOutput {
   double **ddyn_dx;
   // The first derivative of the dyn_i with respect to the controls.
   double **ddyn_du;
+  // The first derivative of the dyn_i with respect to cross-stage variables.
+  double **ddyn_dtheta;
 
   // The equality constraint values (c(x) = 0); excludes the dynamics.
   double **c;
@@ -53,6 +59,8 @@ struct ModelCallbackOutput {
   double **dc_dx;
   // The first derivative of the c(x) with respect to the controls.
   double **dc_du;
+  // The first derivative of the c(x) with respect to cross-stage variables.
+  double **dc_dtheta;
 
   // The inequality constraint values (g(x) <= 0).
   double **g;
@@ -60,6 +68,8 @@ struct ModelCallbackOutput {
   double **dg_dx;
   // The first derivative of the g(x) with respect to the controls.
   double **dg_du;
+  // The first derivative of the g(x) with respect to cross-stage variables.
+  double **dg_dtheta;
 
   // The second derivative of the Lagrangian with respect to states.
   double **d2L_dx2;
@@ -68,34 +78,48 @@ struct ModelCallbackOutput {
   double **d2L_dxdu;
   // The second derivative of the Lagrangian with respect to controls.
   double **d2L_du2;
+  // The second derivative of the Lagrangian with respect to states and
+  // cross-stage variables.
+  double **d2L_dxdtheta;
+  // The second derivative of the Lagrangian with respect to controls and
+  // cross-stage variables.
+  double **d2L_dudtheta;
+  // The second derivative of the Lagrangian with respect to cross-stage
+  // variables.
+  double *d2L_dtheta2;
   // The user should provide the true Lagrangian Hessian blocks. SIP applies
   // primal regularization and retries factorization when the Riccati pivots do
   // not certify the desired Newton-KKT inertia.
 
   // To dynamically allocate the required memory.
   void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
-               int g_dim);
+               int g_dim, int theta_dim = 0);
   void free(int num_stages);
 
   // For using pre-allocated (possibly statically allocated) memory.
   auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
-                  int g_dim, unsigned char *mem_ptr) -> int;
+                  int g_dim, unsigned char *mem_ptr, int theta_dim = 0) -> int;
 
   // For knowing how much memory to pre-allocate.
   static constexpr auto num_bytes(int state_dim, int control_dim,
-                                  int num_stages, int c_dim, int g_dim) -> int {
+                                  int num_stages, int c_dim, int g_dim,
+                                  int theta_dim = 0) -> int {
     const int n = state_dim;
     const int m = control_dim;
     const int T = num_stages;
+    const int p = theta_dim;
 
     const int df_dx_size =
         (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
     const int df_du_size = T * sizeof(double *) + T * m * sizeof(double);
+    const int df_dtheta_size = p * sizeof(double);
 
     const int dyn_res_size =
         (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
     const int ddyn_dx_size = T * sizeof(double *) + T * n * n * sizeof(double);
     const int ddyn_du_size = T * sizeof(double *) + T * n * m * sizeof(double);
+    const int ddyn_dtheta_size =
+        T * sizeof(double *) + T * n * p * sizeof(double);
 
     const int c_size =
         (T + 1) * sizeof(double *) + (T + 1) * c_dim * sizeof(double);
@@ -103,6 +127,8 @@ struct ModelCallbackOutput {
         (T + 1) * sizeof(double *) + (T + 1) * c_dim * n * sizeof(double);
     const int dc_du_size =
         T * sizeof(double *) + T * c_dim * m * sizeof(double);
+    const int dc_dtheta_size =
+        (T + 1) * sizeof(double *) + (T + 1) * c_dim * p * sizeof(double);
 
     const int g_size =
         (T + 1) * sizeof(double *) + (T + 1) * g_dim * sizeof(double);
@@ -110,16 +136,25 @@ struct ModelCallbackOutput {
         (T + 1) * sizeof(double *) + (T + 1) * g_dim * n * sizeof(double);
     const int dg_du_size =
         T * sizeof(double *) + T * g_dim * m * sizeof(double);
+    const int dg_dtheta_size =
+        (T + 1) * sizeof(double *) + (T + 1) * g_dim * p * sizeof(double);
 
     const int d2L_dx2_size =
         (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
     const int d2L_dxdu_size = T * sizeof(double *) + T * n * m * sizeof(double);
     const int d2L_du2_size = T * sizeof(double *) + T * m * m * sizeof(double);
+    const int d2L_dxdtheta_size =
+        (T + 1) * sizeof(double *) + (T + 1) * n * p * sizeof(double);
+    const int d2L_dudtheta_size =
+        T * sizeof(double *) + T * m * p * sizeof(double);
+    const int d2L_dtheta2_size = p * p * sizeof(double);
 
-    return df_dx_size + df_du_size + dyn_res_size + ddyn_dx_size +
-           ddyn_du_size + c_size + dc_dx_size + dc_du_size + g_size +
-           dg_dx_size + dg_du_size + d2L_dx2_size + d2L_dxdu_size +
-           d2L_du2_size;
+    return df_dx_size + df_du_size + df_dtheta_size + dyn_res_size +
+           ddyn_dx_size + ddyn_du_size + ddyn_dtheta_size + c_size +
+           dc_dx_size + dc_du_size + dc_dtheta_size + g_size + dg_dx_size +
+           dg_du_size + dg_dtheta_size + d2L_dx2_size + d2L_dxdu_size +
+           d2L_du2_size + d2L_dxdtheta_size + d2L_dudtheta_size +
+           d2L_dtheta2_size;
   }
 };
 
@@ -130,14 +165,22 @@ struct Input {
     int control_dim;
     int c_dim;
     int g_dim;
+    // Number of cross-stage variables shared by every stage.
+    int theta_dim = 0;
 
-    int get_x_dim() const {
+    int get_stagewise_x_dim() const {
       return num_stages * (state_dim + control_dim) + state_dim;
     }
+
+    int get_x_dim() const { return get_stagewise_x_dim() + theta_dim; }
 
     int get_y_dim() const { return (c_dim + state_dim) * (num_stages + 1); }
 
     int get_z_dim() const { return g_dim * (num_stages + 1); }
+
+    int get_stagewise_kkt_dim() const {
+      return get_stagewise_x_dim() + get_y_dim() + get_z_dim();
+    }
   };
   using ModelCallback = std::function<void(const ModelCallbackInput &)>;
 
@@ -161,23 +204,36 @@ struct Workspace {
     double **c_mod;
     double **dyn_r2;
     double **c_r2_inv;
+    double *theta_jacobian;
+    double *theta_solution;
+    double *theta_schur;
+    double *theta_schur_factor;
+    double *theta_rhs;
+    double *theta_stagewise_rhs;
 
     // To dynamically allocate the required memory.
     void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
-                 int g_dim);
+                 int g_dim, int theta_dim = 0);
     void free(int num_stages);
 
     // For using pre-allocated (possibly statically allocated) memory.
     auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
-                    int g_dim, unsigned char *mem_ptr) -> int;
+                    int g_dim, unsigned char *mem_ptr, int theta_dim = 0)
+        -> int;
 
     // For knowing how much memory to pre-allocate.
     static constexpr auto num_bytes(int state_dim, int control_dim,
-                                    int num_stages, int c_dim, int g_dim)
+                                    int num_stages, int c_dim, int g_dim,
+                                    int theta_dim = 0)
         -> int {
       const int T = num_stages;
       const int n = state_dim;
       const int m = control_dim;
+      const int p = theta_dim;
+      const int stagewise_x_dim = T * (n + m) + n;
+      const int y_dim = (c_dim + n) * (T + 1);
+      const int z_dim = g_dim * (T + 1);
+      const int stagewise_kkt_dim = stagewise_x_dim + y_dim + z_dim;
 
       const int mod_w_inv_size =
           (T + 1) * sizeof(double *) + (T + 1) * g_dim * sizeof(double);
@@ -194,35 +250,43 @@ struct Workspace {
           (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
       const int c_r2_inv_size =
           (T + 1) * sizeof(double *) + (T + 1) * c_dim * sizeof(double);
+      const int theta_data_size =
+          p > 0 ? (2 * stagewise_kkt_dim * p + 2 * p * p + p +
+                   stagewise_kkt_dim) *
+                      static_cast<int>(sizeof(double))
+                : 0;
 
       return mod_w_inv_size + Q_mod_size + M_mod_size + R_mod_size +
-             q_mod_size + r_mod_size + c_mod_size + dyn_r2_size + c_r2_inv_size;
+             q_mod_size + r_mod_size + c_mod_size + dyn_r2_size +
+             c_r2_inv_size + theta_data_size;
     }
   };
 
   // To dynamically allocate the required memory.
   void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
-               int g_dim);
+               int g_dim, int theta_dim = 0);
   void free(int num_stages);
 
   // For using pre-allocated (possibly statically allocated) memory.
   auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
-                  int g_dim, unsigned char *mem_ptr) -> int;
+                  int g_dim, unsigned char *mem_ptr, int theta_dim = 0) -> int;
 
   // For knowing how much memory to pre-allocate.
   static constexpr auto num_bytes(int state_dim, int control_dim,
-                                  int num_stages, int c_dim, int g_dim) -> int {
-    const int x_dim = num_stages * (state_dim + control_dim) + state_dim;
+                                  int num_stages, int c_dim, int g_dim,
+                                  int theta_dim = 0) -> int {
+    const int x_dim =
+        num_stages * (state_dim + control_dim) + state_dim + theta_dim;
     const int y_dim = (c_dim + state_dim) * (num_stages + 1);
     const int z_dim = g_dim * (num_stages + 1);
     return ModelCallbackOutput::num_bytes(state_dim, control_dim, num_stages,
-                                          c_dim, g_dim) +
+                                          c_dim, g_dim, theta_dim) +
            ModelCallbackInput::num_bytes(num_stages) +
            (x_dim + y_dim + z_dim) * sizeof(double) +
            LQR::Workspace::num_bytes(state_dim, control_dim, num_stages) +
            LQR::Output::num_bytes(num_stages) +
            RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
-                                         c_dim, g_dim) +
+                                         c_dim, g_dim, theta_dim) +
            sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
   }
 

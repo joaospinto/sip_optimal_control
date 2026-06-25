@@ -22,6 +22,8 @@ auto solve(const Input &input, const ::sip::Settings &settings,
           x += input.dimensions.control_dim;
         }
         workspace.model_callback_input.states[input.dimensions.num_stages] = x;
+        x += input.dimensions.state_dim;
+        workspace.model_callback_input.theta = x;
       }
     }
 
@@ -64,6 +66,9 @@ auto solve(const Input &input, const ::sip::Settings &settings,
         std::copy_n(
             workspace.model_callback_output.df_dx[input.dimensions.num_stages],
             input.dimensions.state_dim, grad_f);
+        grad_f += input.dimensions.state_dim;
+        std::copy_n(workspace.model_callback_output.df_dtheta,
+                    input.dimensions.theta_dim, grad_f);
       }
 
       {

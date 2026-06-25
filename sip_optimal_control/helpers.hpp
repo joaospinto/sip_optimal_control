@@ -21,6 +21,9 @@ public:
   void add_GTx_to_y(const double *x, double *y);
 
 private:
+  void form_theta_jacobian();
+  void solve_stagewise_kkt(const double *b, double *sol);
+
   const Input &input_;
   Workspace &workspace_;
   LQR::Input lqr_input_;
