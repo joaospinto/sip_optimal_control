@@ -43,6 +43,8 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
   V = new double *[num_stages + 1];
   G_factor = new double *[num_stages];
   F_factor = new double *[num_stages + 1];
+  sqrt_delta = new double *[num_stages + 1];
+  sqrt_delta_inv = new double *[num_stages + 1];
   k = new double *[num_stages];
   v = new double *[num_stages + 1];
 
@@ -52,6 +54,8 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
     V[i] = new double[state_dim * state_dim];
     G_factor[i] = new double[control_dim * control_dim];
     F_factor[i] = new double[state_dim * state_dim];
+    sqrt_delta[i] = new double[state_dim];
+    sqrt_delta_inv[i] = new double[state_dim];
     k[i] = new double[control_dim];
     v[i] = new double[state_dim];
   }
@@ -59,6 +63,8 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
   V[num_stages] = new double[state_dim * state_dim];
   v[num_stages] = new double[state_dim];
   F_factor[num_stages] = new double[state_dim * state_dim];
+  sqrt_delta[num_stages] = new double[state_dim];
+  sqrt_delta_inv[num_stages] = new double[state_dim];
 
   G = new double[control_dim * control_dim];
   g = new double[state_dim];
@@ -66,8 +72,6 @@ void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
   h = new double[control_dim];
   F = new double[state_dim * state_dim];
   f = new double[state_dim];
-  sqrt_delta = new double[state_dim];
-  sqrt_delta_inv = new double[state_dim];
 }
 
 void LQR::Workspace::free(int num_stages) {
@@ -77,8 +81,6 @@ void LQR::Workspace::free(int num_stages) {
   delete[] h;
   delete[] F;
   delete[] f;
-  delete[] sqrt_delta;
-  delete[] sqrt_delta_inv;
 
   for (int i = 0; i < num_stages; ++i) {
     delete[] W[i];
@@ -86,6 +88,8 @@ void LQR::Workspace::free(int num_stages) {
     delete[] V[i];
     delete[] G_factor[i];
     delete[] F_factor[i];
+    delete[] sqrt_delta[i];
+    delete[] sqrt_delta_inv[i];
     delete[] k[i];
     delete[] v[i];
   }
@@ -93,12 +97,16 @@ void LQR::Workspace::free(int num_stages) {
   delete[] V[num_stages];
   delete[] v[num_stages];
   delete[] F_factor[num_stages];
+  delete[] sqrt_delta[num_stages];
+  delete[] sqrt_delta_inv[num_stages];
 
   delete[] W;
   delete[] K;
   delete[] V;
   delete[] G_factor;
   delete[] F_factor;
+  delete[] sqrt_delta;
+  delete[] sqrt_delta_inv;
   delete[] k;
   delete[] v;
 }
@@ -120,6 +128,12 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
   cum_size += num_stages * sizeof(double *);
 
   F_factor = reinterpret_cast<double **>(mem_ptr + cum_size);
+  cum_size += (num_stages + 1) * sizeof(double *);
+
+  sqrt_delta = reinterpret_cast<double **>(mem_ptr + cum_size);
+  cum_size += (num_stages + 1) * sizeof(double *);
+
+  sqrt_delta_inv = reinterpret_cast<double **>(mem_ptr + cum_size);
   cum_size += (num_stages + 1) * sizeof(double *);
 
   k = reinterpret_cast<double **>(mem_ptr + cum_size);
@@ -144,6 +158,12 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
     F_factor[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
     cum_size += state_dim * state_dim * sizeof(double);
 
+    sqrt_delta[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
+    cum_size += state_dim * sizeof(double);
+
+    sqrt_delta_inv[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
+    cum_size += state_dim * sizeof(double);
+
     k[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
     cum_size += control_dim * sizeof(double);
 
@@ -159,6 +179,12 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
 
   F_factor[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += state_dim * state_dim * sizeof(double);
+
+  sqrt_delta[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += state_dim * sizeof(double);
+
+  sqrt_delta_inv[num_stages] = reinterpret_cast<double *>(mem_ptr + cum_size);
+  cum_size += state_dim * sizeof(double);
 
   G = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += control_dim * control_dim * sizeof(double);
@@ -176,12 +202,6 @@ auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
   cum_size += state_dim * state_dim * sizeof(double);
 
   f = reinterpret_cast<double *>(mem_ptr + cum_size);
-  cum_size += state_dim * sizeof(double);
-
-  sqrt_delta = reinterpret_cast<double *>(mem_ptr + cum_size);
-  cum_size += state_dim * sizeof(double);
-
-  sqrt_delta_inv = reinterpret_cast<double *>(mem_ptr + cum_size);
   cum_size += state_dim * sizeof(double);
 
   assert(cum_size ==
@@ -231,15 +251,9 @@ bool factor_F(const double *delta_data,
 }
 
 void F_inv_mult_matrix(
-    const double *delta_data, const double *F_factor_data,
-    const Eigen::Ref<const Eigen::MatrixXd> &rhs,
-    Eigen::Ref<Eigen::MatrixXd> result, double *sqrt_delta_data,
-    double *sqrt_delta_inv_data, const int n) {
-  const bool delta_ok =
-      compute_delta_sqrt(delta_data, sqrt_delta_data, sqrt_delta_inv_data, n);
-  assert(delta_ok);
-  (void)delta_ok;
-
+    const double *F_factor_data, const Eigen::Ref<const Eigen::MatrixXd> &rhs,
+    Eigen::Ref<Eigen::MatrixXd> result, const double *sqrt_delta_data,
+    const double *sqrt_delta_inv_data, const int n) {
   const auto F_factor =
       Eigen::Map<const Eigen::MatrixXd>(F_factor_data, n, n);
 
@@ -262,15 +276,9 @@ void F_inv_mult_matrix(
 }
 
 void F_inv_mult_vector(
-    const double *delta_data, const double *F_factor_data,
-    const Eigen::Ref<const Eigen::VectorXd> &rhs,
-    Eigen::Ref<Eigen::VectorXd> result, double *sqrt_delta_data,
-    double *sqrt_delta_inv_data, const int n) {
-  const bool delta_ok =
-      compute_delta_sqrt(delta_data, sqrt_delta_data, sqrt_delta_inv_data, n);
-  assert(delta_ok);
-  (void)delta_ok;
-
+    const double *F_factor_data, const Eigen::Ref<const Eigen::VectorXd> &rhs,
+    Eigen::Ref<Eigen::VectorXd> result, const double *sqrt_delta_data,
+    const double *sqrt_delta_inv_data, const int n) {
   const auto F_factor =
       Eigen::Map<const Eigen::MatrixXd>(F_factor_data, n, n);
 
@@ -304,7 +312,8 @@ bool LQR::factor() {
   if (!factor_F(
           input_.delta[input_.dimensions.num_stages], V_N,
           workspace_.F_factor[input_.dimensions.num_stages],
-          workspace_.sqrt_delta, workspace_.sqrt_delta_inv,
+          workspace_.sqrt_delta[input_.dimensions.num_stages],
+          workspace_.sqrt_delta_inv[input_.dimensions.num_stages],
           input_.dimensions.state_dim)) {
     return false;
   }
@@ -355,10 +364,10 @@ bool LQR::factor() {
     auto F_i = Eigen::Map<Eigen::MatrixXd>(
         workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
 
-    F_inv_mult_matrix(
-        input_.delta[i + 1], workspace_.F_factor[i + 1], V_ip1, W_i,
-        workspace_.sqrt_delta, workspace_.sqrt_delta_inv,
-        input_.dimensions.state_dim);
+    F_inv_mult_matrix(workspace_.F_factor[i + 1], V_ip1, W_i,
+                      workspace_.sqrt_delta[i + 1],
+                      workspace_.sqrt_delta_inv[i + 1],
+                      input_.dimensions.state_dim);
 
     // NOTE: We use H_i as scratch memory for computing G_i.
     H_i.noalias() = B_i.transpose() * W_i;
@@ -390,7 +399,7 @@ bool LQR::factor() {
     V_i += F_i;
 
     if (!factor_F(input_.delta[i], V_i, workspace_.F_factor[i],
-                  workspace_.sqrt_delta, workspace_.sqrt_delta_inv,
+                  workspace_.sqrt_delta[i], workspace_.sqrt_delta_inv[i],
                   input_.dimensions.state_dim)) {
       return false;
     }
@@ -491,10 +500,9 @@ void LQR::solve(Output &output) {
       input_.delta[0], input_.dimensions.state_dim);
 
   f_0.noalias() = delta_0.asDiagonal() * v_0 - c_0;
-  F_inv_mult_vector(
-      input_.delta[0], workspace_.F_factor[0], f_0, x_0,
-      workspace_.sqrt_delta, workspace_.sqrt_delta_inv,
-      input_.dimensions.state_dim);
+  F_inv_mult_vector(workspace_.F_factor[0], f_0, x_0, workspace_.sqrt_delta[0],
+                    workspace_.sqrt_delta_inv[0],
+                    input_.dimensions.state_dim);
   x_0 *= -1.0;
 
   auto y_0 =
@@ -544,10 +552,10 @@ void LQR::solve(Output &output) {
 
     f_ip1.noalias() =
         c_ip1 - delta_ip1.asDiagonal() * v_ip1 + A_i * x_i + B_i * u_i;
-    F_inv_mult_vector(
-        input_.delta[i + 1], workspace_.F_factor[i + 1], f_ip1, x_ip1,
-        workspace_.sqrt_delta, workspace_.sqrt_delta_inv,
-        input_.dimensions.state_dim);
+    F_inv_mult_vector(workspace_.F_factor[i + 1], f_ip1, x_ip1,
+                      workspace_.sqrt_delta[i + 1],
+                      workspace_.sqrt_delta_inv[i + 1],
+                      input_.dimensions.state_dim);
 
     y_ip1_prefix.noalias() = v_ip1 + V_ip1 * x_ip1;
   }
