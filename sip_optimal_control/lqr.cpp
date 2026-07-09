@@ -467,7 +467,7 @@ void LQR::solve(Output &output) {
     const auto delta_ip1 = Eigen::Map<const Eigen::VectorXd>(
         input_.delta[i + 1], input_.dimensions.state_dim);
 
-    f_i.noalias() = delta_ip1.asDiagonal() * v_ip1 - c_ip1;
+    f_i.noalias() = delta_ip1.cwiseProduct(v_ip1) - c_ip1;
     g_i.noalias() = v_ip1 - W_i * f_i;
 
     h_i.noalias() = r_i + B_i.transpose() * g_i;
@@ -499,7 +499,7 @@ void LQR::solve(Output &output) {
   const auto delta_0 = Eigen::Map<const Eigen::VectorXd>(
       input_.delta[0], input_.dimensions.state_dim);
 
-  f_0.noalias() = delta_0.asDiagonal() * v_0 - c_0;
+  f_0.noalias() = delta_0.cwiseProduct(v_0) - c_0;
   F_inv_mult_vector(workspace_.F_factor[0], f_0, x_0, workspace_.sqrt_delta[0],
                     workspace_.sqrt_delta_inv[0],
                     input_.dimensions.state_dim);
@@ -551,7 +551,7 @@ void LQR::solve(Output &output) {
         input_.delta[i + 1], input_.dimensions.state_dim);
 
     f_ip1.noalias() =
-        c_ip1 - delta_ip1.asDiagonal() * v_ip1 + A_i * x_i + B_i * u_i;
+        c_ip1 - delta_ip1.cwiseProduct(v_ip1) + A_i * x_i + B_i * u_i;
     F_inv_mult_vector(workspace_.F_factor[i + 1], f_ip1, x_ip1,
                       workspace_.sqrt_delta[i + 1],
                       workspace_.sqrt_delta_inv[i + 1],

@@ -297,13 +297,15 @@ void CallbackProvider::solve_stagewise_kkt(const double *b, double *sol) {
 
       q_i_mod.noalias() =
           -(b_x_i +
-            jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * b_y_i_suffix +
-            jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * b_z_i);
+            jac_x_c_i.transpose() *
+                c_r2_inv_i.cwiseProduct(b_y_i_suffix) +
+            jac_x_g_i.transpose() * mod_w_inv_i.cwiseProduct(b_z_i));
 
       r_i_mod.noalias() =
           -(b_u_i +
-            jac_u_c_i.transpose() * c_r2_inv_i.asDiagonal() * b_y_i_suffix +
-            jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * b_z_i);
+            jac_u_c_i.transpose() *
+                c_r2_inv_i.cwiseProduct(b_y_i_suffix) +
+            jac_u_g_i.transpose() * mod_w_inv_i.cwiseProduct(b_z_i));
 
       c_i_mod.noalias() = -b_y_i_prefix;
     }
@@ -345,8 +347,9 @@ void CallbackProvider::solve_stagewise_kkt(const double *b, double *sol) {
         input_.dimensions.state_dim);
 
     q_N_mod.noalias() = -(
-        b_x_N + jac_x_c_N.transpose() * c_r2_inv_N.asDiagonal() * b_y_N_suffix +
-        jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * b_z_N);
+        b_x_N +
+        jac_x_c_N.transpose() * c_r2_inv_N.cwiseProduct(b_y_N_suffix) +
+        jac_x_g_N.transpose() * mod_w_inv_N.cwiseProduct(b_z_N));
 
     c_N_mod = -b_y_N_prefix;
   }
@@ -432,11 +435,11 @@ void CallbackProvider::solve_stagewise_kkt(const double *b, double *sol) {
     auto z_i = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
     z += input_.dimensions.g_dim;
 
-    y_i_suffix.noalias() = c_r2_inv_i.asDiagonal() *
-                           (jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix);
+    y_i_suffix.noalias() = c_r2_inv_i.cwiseProduct(
+        jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix);
 
-    z_i.noalias() =
-        mod_w_inv_i.asDiagonal() * (jac_x_g_i * x_i + jac_u_g_i * u_i - b_z_i);
+    z_i.noalias() = mod_w_inv_i.cwiseProduct(jac_x_g_i * x_i +
+                                             jac_u_g_i * u_i - b_z_i);
   }
 
   const auto x_N =
@@ -465,10 +468,10 @@ void CallbackProvider::solve_stagewise_kkt(const double *b, double *sol) {
 
   auto y_N_suffix = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.c_dim);
   y_N_suffix.noalias() =
-      c_r2_inv_N.asDiagonal() * (jac_x_c_N * x_N - b_y_N_suffix);
+      c_r2_inv_N.cwiseProduct(jac_x_c_N * x_N - b_y_N_suffix);
 
   auto z_N = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
-  z_N.noalias() = mod_w_inv_N.asDiagonal() * (jac_x_g_N * x_N - b_z_N);
+  z_N.noalias() = mod_w_inv_N.cwiseProduct(jac_x_g_N * x_N - b_z_N);
 }
 
 void CallbackProvider::solve(const double *b, double *sol) {
