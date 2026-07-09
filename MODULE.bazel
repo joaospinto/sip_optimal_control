@@ -16,6 +16,10 @@ bazel_dep(name = "eigen", version = "3.4.0.bcr.3")
 # https://github.com/google/googletest
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
 
+# Google Benchmark
+# https://github.com/google/benchmark
+bazel_dep(name = "google_benchmark", version = "1.9.5", dev_dependency = True)
+
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.17")
 

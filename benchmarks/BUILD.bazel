@@ -1,0 +1,12 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "lqr_benchmark",
+    srcs = ["lqr_benchmark.cpp"],
+    linkstatic = True,
+    deps = [
+        "//sip_optimal_control:lqr",
+        "@eigen",
+        "@google_benchmark//:benchmark_main",
+    ],
+)
