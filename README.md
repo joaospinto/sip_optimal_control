@@ -1,4 +1,6 @@
 # sip_optimal_control
+[![CI](https://github.com/joaospinto/sip_optimal_control/actions/workflows/ci.yml/badge.svg)](https://github.com/joaospinto/sip_optimal_control/actions/workflows/ci.yml)
+[![Benchmarks](https://github.com/joaospinto/sip_optimal_control/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/joaospinto/sip_optimal_control/actions/workflows/benchmarks.yml)
 
 This repository implements an optimal control front-end to the
 [SIP](https://github.com/joaospinto/sip)
