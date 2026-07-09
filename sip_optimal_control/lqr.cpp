@@ -227,9 +227,10 @@ bool compute_delta_sqrt(const double *delta_data, double *sqrt_delta_data,
   return true;
 }
 
-auto factor_F(const double *delta_data, const Eigen::Ref<const Eigen::MatrixXd> &V,
-              double *F_factor_data, double *sqrt_delta_data,
-              double *sqrt_delta_inv_data, const int n) -> LQR::FactorStatus {
+auto factor_F(const double *delta_data,
+              const Eigen::Ref<const Eigen::MatrixXd> &V, double *F_factor_data,
+              double *sqrt_delta_data, double *sqrt_delta_inv_data, const int n)
+    -> LQR::FactorStatus {
   if (!compute_delta_sqrt(delta_data, sqrt_delta_data, sqrt_delta_inv_data,
                           n)) {
     return LQR::FactorStatus::INVALID_DELTA;
@@ -250,46 +251,40 @@ auto factor_F(const double *delta_data, const Eigen::Ref<const Eigen::MatrixXd> 
              : LQR::FactorStatus::F_FACTORIZATION_FAILURE;
 }
 
-void F_inv_mult_matrix(
-    const double *F_factor_data, const Eigen::Ref<const Eigen::MatrixXd> &rhs,
-    Eigen::Ref<Eigen::MatrixXd> result, const double *sqrt_delta_data,
-    const double *sqrt_delta_inv_data, const int n) {
-  const auto F_factor =
-      Eigen::Map<const Eigen::MatrixXd>(F_factor_data, n, n);
+void compute_regularized_W(const double *F_factor_data,
+                           Eigen::Ref<Eigen::MatrixXd> result,
+                           const double *sqrt_delta_inv_data, const int n) {
+  const auto F_factor = Eigen::Map<const Eigen::MatrixXd>(F_factor_data, n, n);
 
-  for (int col = 0; col < rhs.cols(); ++col) {
-    for (int row = 0; row < n; ++row) {
-      result(row, col) = sqrt_delta_inv_data[row] * rhs(row, col);
-    }
-  }
-
+  result.setIdentity();
   F_factor.template triangularView<Eigen::Lower>().solveInPlace(result);
-  F_factor.transpose()
-      .template triangularView<Eigen::Upper>()
-      .solveInPlace(result);
+  F_factor.transpose().template triangularView<Eigen::Upper>().solveInPlace(
+      result);
+
+  result *= -1.0;
+  result.diagonal().array() += 1.0;
 
   for (int col = 0; col < result.cols(); ++col) {
     for (int row = 0; row < n; ++row) {
-      result(row, col) *= sqrt_delta_data[row];
+      result(row, col) *= sqrt_delta_inv_data[row] * sqrt_delta_inv_data[col];
     }
   }
 }
 
-void F_inv_mult_vector(
-    const double *F_factor_data, const Eigen::Ref<const Eigen::VectorXd> &rhs,
-    Eigen::Ref<Eigen::VectorXd> result, const double *sqrt_delta_data,
-    const double *sqrt_delta_inv_data, const int n) {
-  const auto F_factor =
-      Eigen::Map<const Eigen::MatrixXd>(F_factor_data, n, n);
+void F_inv_mult_vector(const double *F_factor_data,
+                       const Eigen::Ref<const Eigen::VectorXd> &rhs,
+                       Eigen::Ref<Eigen::VectorXd> result,
+                       const double *sqrt_delta_data,
+                       const double *sqrt_delta_inv_data, const int n) {
+  const auto F_factor = Eigen::Map<const Eigen::MatrixXd>(F_factor_data, n, n);
 
   for (int row = 0; row < n; ++row) {
     result(row) = sqrt_delta_inv_data[row] * rhs(row);
   }
 
   F_factor.template triangularView<Eigen::Lower>().solveInPlace(result);
-  F_factor.transpose()
-      .template triangularView<Eigen::Upper>()
-      .solveInPlace(result);
+  F_factor.transpose().template triangularView<Eigen::Upper>().solveInPlace(
+      result);
 
   for (int row = 0; row < n; ++row) {
     result(row) *= sqrt_delta_data[row];
@@ -310,12 +305,12 @@ auto LQR::factor_with_status() -> FactorStatus {
   V_N.noalias() = Q_N;
 
   {
-    const auto factor_status = factor_F(
-        input_.delta[input_.dimensions.num_stages], V_N,
-        workspace_.F_factor[input_.dimensions.num_stages],
-        workspace_.sqrt_delta[input_.dimensions.num_stages],
-        workspace_.sqrt_delta_inv[input_.dimensions.num_stages],
-        input_.dimensions.state_dim);
+    const auto factor_status =
+        factor_F(input_.delta[input_.dimensions.num_stages], V_N,
+                 workspace_.F_factor[input_.dimensions.num_stages],
+                 workspace_.sqrt_delta[input_.dimensions.num_stages],
+                 workspace_.sqrt_delta_inv[input_.dimensions.num_stages],
+                 input_.dimensions.state_dim);
     if (factor_status != FactorStatus::SUCCESS) {
       return factor_status;
     }
@@ -340,10 +335,6 @@ auto LQR::factor_with_status() -> FactorStatus {
         input_.R[i], input_.dimensions.control_dim,
         input_.dimensions.control_dim);
 
-    const auto V_ip1 = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.V[i + 1], input_.dimensions.state_dim,
-        input_.dimensions.state_dim);
-
     auto W_i = Eigen::Map<Eigen::MatrixXd>(workspace_.W[i],
                                            input_.dimensions.state_dim,
                                            input_.dimensions.state_dim);
@@ -367,10 +358,9 @@ auto LQR::factor_with_status() -> FactorStatus {
     auto F_i = Eigen::Map<Eigen::MatrixXd>(
         workspace_.F, input_.dimensions.state_dim, input_.dimensions.state_dim);
 
-    F_inv_mult_matrix(workspace_.F_factor[i + 1], V_ip1, W_i,
-                      workspace_.sqrt_delta[i + 1],
-                      workspace_.sqrt_delta_inv[i + 1],
-                      input_.dimensions.state_dim);
+    compute_regularized_W(workspace_.F_factor[i + 1], W_i,
+                          workspace_.sqrt_delta_inv[i + 1],
+                          input_.dimensions.state_dim);
 
     // NOTE: We use H_i as scratch memory for computing G_i.
     H_i.noalias() = B_i.transpose() * W_i;
@@ -391,9 +381,8 @@ auto LQR::factor_with_status() -> FactorStatus {
 
     K_i.noalias() = H_i;
     G_i_factor.template triangularView<Eigen::Lower>().solveInPlace(K_i);
-    G_i_factor.transpose()
-        .template triangularView<Eigen::Upper>()
-        .solveInPlace(K_i);
+    G_i_factor.transpose().template triangularView<Eigen::Upper>().solveInPlace(
+        K_i);
     K_i *= -1.0;
 
     // NOTE: We use F_i as scratch memory for computing V_i.
@@ -401,10 +390,9 @@ auto LQR::factor_with_status() -> FactorStatus {
     F_i.noalias() = Q_i + K_i.transpose() * H_i;
     V_i += F_i;
 
-    const auto factor_status =
-        factor_F(input_.delta[i], V_i, workspace_.F_factor[i],
-                 workspace_.sqrt_delta[i], workspace_.sqrt_delta_inv[i],
-                 input_.dimensions.state_dim);
+    const auto factor_status = factor_F(
+        input_.delta[i], V_i, workspace_.F_factor[i], workspace_.sqrt_delta[i],
+        workspace_.sqrt_delta_inv[i], input_.dimensions.state_dim);
     if (factor_status != FactorStatus::SUCCESS) {
       return factor_status;
     }
@@ -413,9 +401,7 @@ auto LQR::factor_with_status() -> FactorStatus {
   return FactorStatus::SUCCESS;
 }
 
-bool LQR::factor() {
-  return factor_with_status() == FactorStatus::SUCCESS;
-}
+bool LQR::factor() { return factor_with_status() == FactorStatus::SUCCESS; }
 
 void LQR::solve(Output &output) {
   const auto q_N = Eigen::Map<const Eigen::VectorXd>(
@@ -482,9 +468,8 @@ void LQR::solve(Output &output) {
     h_i.noalias() = r_i + B_i.transpose() * g_i;
     k_i.noalias() = h_i;
     G_i_factor.template triangularView<Eigen::Lower>().solveInPlace(k_i);
-    G_i_factor.transpose()
-        .template triangularView<Eigen::Upper>()
-        .solveInPlace(k_i);
+    G_i_factor.transpose().template triangularView<Eigen::Upper>().solveInPlace(
+        k_i);
     k_i *= -1.0;
 
     v_i.noalias() = q_i + A_i.transpose() * g_i + K_i.transpose() * h_i;
@@ -510,8 +495,7 @@ void LQR::solve(Output &output) {
 
   f_0.noalias() = delta_0.cwiseProduct(v_0) - c_0;
   F_inv_mult_vector(workspace_.F_factor[0], f_0, x_0, workspace_.sqrt_delta[0],
-                    workspace_.sqrt_delta_inv[0],
-                    input_.dimensions.state_dim);
+                    workspace_.sqrt_delta_inv[0], input_.dimensions.state_dim);
   x_0 *= -1.0;
 
   auto y_0 =
@@ -561,10 +545,9 @@ void LQR::solve(Output &output) {
 
     f_ip1.noalias() =
         c_ip1 - delta_ip1.cwiseProduct(v_ip1) + A_i * x_i + B_i * u_i;
-    F_inv_mult_vector(workspace_.F_factor[i + 1], f_ip1, x_ip1,
-                      workspace_.sqrt_delta[i + 1],
-                      workspace_.sqrt_delta_inv[i + 1],
-                      input_.dimensions.state_dim);
+    F_inv_mult_vector(
+        workspace_.F_factor[i + 1], f_ip1, x_ip1, workspace_.sqrt_delta[i + 1],
+        workspace_.sqrt_delta_inv[i + 1], input_.dimensions.state_dim);
 
     y_ip1_prefix.noalias() = v_ip1 + V_ip1 * x_ip1;
   }
