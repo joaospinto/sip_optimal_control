@@ -130,9 +130,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
                                                input_.dimensions.control_dim,
                                                input_.dimensions.control_dim);
 
-    Q_i_mod.noalias() =
-        Q_i + r1 * Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                             input_.dimensions.state_dim);
+    Q_i_mod.noalias() = Q_i;
+    Q_i_mod.diagonal().array() += r1;
     Q_i_mod += jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_x_c_i;
     Q_i_mod += jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_x_g_i;
 
@@ -140,9 +139,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
         M_i + jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_u_c_i +
         jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
 
-    R_i_mod.noalias() =
-        R_i + r1 * Eigen::MatrixXd::Identity(input_.dimensions.control_dim,
-                                             input_.dimensions.control_dim);
+    R_i_mod.noalias() = R_i;
+    R_i_mod.diagonal().array() += r1;
     R_i_mod += jac_u_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_u_c_i;
     R_i_mod += jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
   }
@@ -178,9 +176,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
       lqr_data.Q_mod[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
 
-  Q_N_mod.noalias() =
-      Q_N + r1 * Eigen::MatrixXd::Identity(input_.dimensions.state_dim,
-                                           input_.dimensions.state_dim);
+  Q_N_mod.noalias() = Q_N;
+  Q_N_mod.diagonal().array() += r1;
   Q_N_mod += jac_x_c_N.transpose() * c_r2_inv_N.asDiagonal() * jac_x_c_N;
   Q_N_mod += jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * jac_x_g_N;
 
@@ -223,8 +220,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
       mco.d2L_dtheta2, input_.dimensions.theta_dim, input_.dimensions.theta_dim);
   auto S_theta =
       Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur, p, p);
-  S_theta.noalias() =
-      H_theta_theta + r1 * Eigen::MatrixXd::Identity(p, p);
+  S_theta.noalias() = H_theta_theta;
+  S_theta.diagonal().array() += r1;
   S_theta.noalias() -= J_theta.transpose() * K_inv_J_theta;
 
   auto S_theta_factor =
