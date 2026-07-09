@@ -47,8 +47,8 @@ public:
     double **W;
     double **K;
     double **V;
-    double **G_inv;
-    double **F_inv;
+    double **G_factor;
+    double **F_factor;
     double **k;
     double **v;
 
@@ -80,8 +80,9 @@ public:
       const int K_size = T * sizeof(double *) + T * m * n * sizeof(double);
       const int V_size =
           (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
-      const int G_inv_size = T * sizeof(double *) + T * m * m * sizeof(double);
-      const int F_inv_size =
+      const int G_factor_size =
+          T * sizeof(double *) + T * m * m * sizeof(double);
+      const int F_factor_size =
           (T + 1) * sizeof(double *) + (T + 1) * n * n * sizeof(double);
       const int k_size = T * sizeof(double *) + T * m * sizeof(double);
       const int v_size =
@@ -94,9 +95,9 @@ public:
       const int f_size = n * sizeof(double);
       const int sqrt_delta_size = n * sizeof(double);
       const int sqrt_delta_inv_size = n * sizeof(double);
-      return W_size + K_size + V_size + G_inv_size + F_inv_size + k_size +
-             v_size + G_size + g_size + H_size + h_size + F_size + f_size +
-             sqrt_delta_size + sqrt_delta_inv_size;
+      return W_size + K_size + V_size + G_factor_size + F_factor_size +
+             k_size + v_size + G_size + g_size + H_size + h_size + F_size +
+             f_size + sqrt_delta_size + sqrt_delta_inv_size;
     }
   };
 
