@@ -4,6 +4,13 @@ namespace sip::optimal_control {
 
 class LQR {
 public:
+  enum class FactorStatus {
+    SUCCESS = 0,
+    INVALID_DELTA = 1,
+    F_FACTORIZATION_FAILURE = 2,
+    G_FACTORIZATION_FAILURE = 3,
+  };
+
   struct Input {
     struct Dimensions {
       int state_dim;
@@ -105,6 +112,7 @@ public:
 
   LQR(const Input &data, Workspace &workspace);
 
+  FactorStatus factor_with_status();
   bool factor();
   void solve(Output &output);
 

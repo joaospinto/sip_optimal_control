@@ -227,14 +227,12 @@ bool compute_delta_sqrt(const double *delta_data, double *sqrt_delta_data,
   return true;
 }
 
-bool factor_F(const double *delta_data,
-              const Eigen::Ref<const Eigen::MatrixXd> &V,
-              double *F_factor_data,
-              double *sqrt_delta_data,
-              double *sqrt_delta_inv_data, const int n) {
+auto factor_F(const double *delta_data, const Eigen::Ref<const Eigen::MatrixXd> &V,
+              double *F_factor_data, double *sqrt_delta_data,
+              double *sqrt_delta_inv_data, const int n) -> LQR::FactorStatus {
   if (!compute_delta_sqrt(delta_data, sqrt_delta_data, sqrt_delta_inv_data,
                           n)) {
-    return false;
+    return LQR::FactorStatus::INVALID_DELTA;
   }
 
   auto F_factor = Eigen::Map<Eigen::MatrixXd>(F_factor_data, n, n);
@@ -247,7 +245,9 @@ bool factor_F(const double *delta_data,
   }
 
   Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(F_factor);
-  return llt.info() == Eigen::Success;
+  return llt.info() == Eigen::Success
+             ? LQR::FactorStatus::SUCCESS
+             : LQR::FactorStatus::F_FACTORIZATION_FAILURE;
 }
 
 void F_inv_mult_matrix(
@@ -298,7 +298,7 @@ void F_inv_mult_vector(
 
 } // namespace
 
-bool LQR::factor() {
+auto LQR::factor_with_status() -> FactorStatus {
   const auto Q_N = Eigen::Map<const Eigen::MatrixXd>(
       input_.Q[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
@@ -309,13 +309,16 @@ bool LQR::factor() {
 
   V_N.noalias() = Q_N;
 
-  if (!factor_F(
-          input_.delta[input_.dimensions.num_stages], V_N,
-          workspace_.F_factor[input_.dimensions.num_stages],
-          workspace_.sqrt_delta[input_.dimensions.num_stages],
-          workspace_.sqrt_delta_inv[input_.dimensions.num_stages],
-          input_.dimensions.state_dim)) {
-    return false;
+  {
+    const auto factor_status = factor_F(
+        input_.delta[input_.dimensions.num_stages], V_N,
+        workspace_.F_factor[input_.dimensions.num_stages],
+        workspace_.sqrt_delta[input_.dimensions.num_stages],
+        workspace_.sqrt_delta_inv[input_.dimensions.num_stages],
+        input_.dimensions.state_dim);
+    if (factor_status != FactorStatus::SUCCESS) {
+      return factor_status;
+    }
   }
 
   for (int i = input_.dimensions.num_stages - 1; i >= 0; --i) {
@@ -376,7 +379,7 @@ bool LQR::factor() {
     {
       Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(G_i_factor);
       if (llt.info() != Eigen::Success) {
-        return false;
+        return FactorStatus::G_FACTORIZATION_FAILURE;
       }
     }
 
@@ -398,14 +401,20 @@ bool LQR::factor() {
     F_i.noalias() = Q_i + K_i.transpose() * H_i;
     V_i += F_i;
 
-    if (!factor_F(input_.delta[i], V_i, workspace_.F_factor[i],
-                  workspace_.sqrt_delta[i], workspace_.sqrt_delta_inv[i],
-                  input_.dimensions.state_dim)) {
-      return false;
+    const auto factor_status =
+        factor_F(input_.delta[i], V_i, workspace_.F_factor[i],
+                 workspace_.sqrt_delta[i], workspace_.sqrt_delta_inv[i],
+                 input_.dimensions.state_dim);
+    if (factor_status != FactorStatus::SUCCESS) {
+      return factor_status;
     }
   }
 
-  return true;
+  return FactorStatus::SUCCESS;
+}
+
+bool LQR::factor() {
+  return factor_with_status() == FactorStatus::SUCCESS;
 }
 
 void LQR::solve(Output &output) {

@@ -1,0 +1,14 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "lqr_test",
+    size = "small",
+    srcs = ["lqr_test.cpp"],
+    linkstatic = True,
+    deps = [
+        "//sip_optimal_control:lqr",
+        "@eigen",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

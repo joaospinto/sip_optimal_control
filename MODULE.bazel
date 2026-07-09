@@ -12,6 +12,10 @@ git_override(
 # eigen
 bazel_dep(name = "eigen", version = "3.4.0.bcr.3")
 
+# Google Test
+# https://github.com/google/googletest
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
+
 # rules_cc
 bazel_dep(name = "rules_cc", version = "0.2.17")
 
