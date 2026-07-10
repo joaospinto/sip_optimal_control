@@ -1,6 +1,6 @@
-#include "sip_optimal_control/lqr.hpp"
-
 #define EIGEN_NO_MALLOC
+
+#include "sip_optimal_control/lqr.hpp"
 
 #include <Eigen/Dense>
 #include <cassert>

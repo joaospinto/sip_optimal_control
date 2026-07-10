@@ -191,10 +191,12 @@ auto compute_residual_norm(const LQRProblem &problem,
 
   for (int i = 0; i < T; ++i) {
     const Eigen::VectorXd stationarity_x =
-        problem.Q[i] * output.x[i] + problem.M[i] * output.u[i] - output.y[i] +
+        problem.Q[i].selfadjointView<Eigen::Lower>() * output.x[i] +
+        problem.M[i] * output.u[i] - output.y[i] +
         problem.A[i].transpose() * output.y[i + 1] + problem.q[i];
     const Eigen::VectorXd stationarity_u =
-        problem.M[i].transpose() * output.x[i] + problem.R[i] * output.u[i] +
+        problem.M[i].transpose() * output.x[i] +
+        problem.R[i].selfadjointView<Eigen::Lower>() * output.u[i] +
         problem.B[i].transpose() * output.y[i + 1] + problem.r[i];
     const Eigen::VectorXd dynamics =
         problem.A[i] * output.x[i] + problem.B[i] * output.u[i] -
@@ -207,7 +209,8 @@ auto compute_residual_norm(const LQRProblem &problem,
   }
 
   const Eigen::VectorXd terminal_stationarity =
-      problem.Q[T] * output.x[T] - output.y[T] + problem.q[T];
+      problem.Q[T].selfadjointView<Eigen::Lower>() * output.x[T] -
+      output.y[T] + problem.q[T];
   const Eigen::VectorXd initial_dynamics =
       -output.x[0] - problem.delta[0].cwiseProduct(output.y[0]) + problem.c[0];
 

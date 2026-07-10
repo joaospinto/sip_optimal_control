@@ -1,9 +1,8 @@
-#include "sip_optimal_control/helpers.hpp"
-
 #define EIGEN_NO_MALLOC
 
+#include "sip_optimal_control/helpers.hpp"
+
 #include <Eigen/Dense>
-#include <algorithm>
 
 namespace sip::optimal_control {
 
@@ -23,7 +22,7 @@ void add_weighted_jacobian_products(
 
     for (int col = 0; col < Q.cols(); ++col) {
       const double weighted_j_x_col = weight * J_x(constraint, col);
-      for (int row = 0; row < Q.rows(); ++row) {
+      for (int row = col; row < Q.rows(); ++row) {
         Q(row, col) += weighted_j_x_col * J_x(constraint, row);
       }
     }
@@ -37,7 +36,7 @@ void add_weighted_jacobian_products(
 
     for (int col = 0; col < R.cols(); ++col) {
       const double weighted_j_u_col = weight * J_u(constraint, col);
-      for (int row = 0; row < R.rows(); ++row) {
+      for (int row = col; row < R.rows(); ++row) {
         R(row, col) += weighted_j_u_col * J_u(constraint, row);
       }
     }
@@ -52,11 +51,16 @@ void add_weighted_state_jacobian_product(
     const double weight = weights(constraint);
     for (int col = 0; col < Q.cols(); ++col) {
       const double weighted_j_x_col = weight * J_x(constraint, col);
-      for (int row = 0; row < Q.rows(); ++row) {
+      for (int row = col; row < Q.rows(); ++row) {
         Q(row, col) += weighted_j_x_col * J_x(constraint, row);
       }
     }
   }
+}
+
+void mirror_lower_to_upper(Eigen::Ref<Eigen::MatrixXd> matrix) {
+  matrix.template triangularView<Eigen::StrictlyUpper>() =
+      matrix.transpose().template triangularView<Eigen::StrictlyUpper>();
 }
 
 } // namespace
@@ -181,18 +185,22 @@ bool CallbackProvider::factor(const double *w, const double r1,
                                                input_.dimensions.control_dim,
                                                input_.dimensions.control_dim);
 
-    Q_i_mod.noalias() = Q_i;
+    Q_i_mod.template triangularView<Eigen::Lower>() =
+        Q_i.template triangularView<Eigen::Lower>();
     Q_i_mod.diagonal().array() += r1;
 
     M_i_mod.noalias() = M_i;
 
-    R_i_mod.noalias() = R_i;
+    R_i_mod.template triangularView<Eigen::Lower>() =
+        R_i.template triangularView<Eigen::Lower>();
     R_i_mod.diagonal().array() += r1;
 
     add_weighted_jacobian_products(Q_i_mod, M_i_mod, R_i_mod, jac_x_c_i,
                                    jac_u_c_i, c_r2_inv_i);
     add_weighted_jacobian_products(Q_i_mod, M_i_mod, R_i_mod, jac_x_g_i,
                                    jac_u_g_i, mod_w_inv_i);
+    mirror_lower_to_upper(Q_i_mod);
+    mirror_lower_to_upper(R_i_mod);
   }
 
   const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
@@ -226,10 +234,12 @@ bool CallbackProvider::factor(const double *w, const double r1,
       lqr_data.Q_mod[input_.dimensions.num_stages], input_.dimensions.state_dim,
       input_.dimensions.state_dim);
 
-  Q_N_mod.noalias() = Q_N;
+  Q_N_mod.template triangularView<Eigen::Lower>() =
+      Q_N.template triangularView<Eigen::Lower>();
   Q_N_mod.diagonal().array() += r1;
   add_weighted_state_jacobian_product(Q_N_mod, jac_x_c_N, c_r2_inv_N);
   add_weighted_state_jacobian_product(Q_N_mod, jac_x_g_N, mod_w_inv_N);
+  mirror_lower_to_upper(Q_N_mod);
 
   lqr_input_.Q = lqr_data.Q_mod;
   lqr_input_.M = lqr_data.M_mod;
