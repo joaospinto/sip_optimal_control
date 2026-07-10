@@ -515,13 +515,12 @@ void CallbackProvider::solve(const double *b, double *sol) {
   theta_rhs.noalias() = Eigen::Map<const Eigen::VectorXd>(b_theta, p) -
                         J_theta.transpose() * K_inv_b;
 
-  auto S_theta_factor =
-      Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur_factor, p, p);
-  const auto S_theta =
-      Eigen::Map<const Eigen::MatrixXd>(theta_data.theta_schur, p, p);
-  S_theta_factor = S_theta;
-  Eigen::LLT<Eigen::Ref<Eigen::MatrixXd>> llt(S_theta_factor);
-  llt.solveInPlace(theta_rhs);
+  const auto S_theta_factor =
+      Eigen::Map<const Eigen::MatrixXd>(theta_data.theta_schur_factor, p, p);
+  S_theta_factor.template triangularView<Eigen::Lower>().solveInPlace(
+      theta_rhs);
+  S_theta_factor.transpose().template triangularView<Eigen::Upper>()
+      .solveInPlace(theta_rhs);
   std::copy_n(theta_data.theta_rhs, p, sol_theta);
 
   stagewise_rhs.noalias() -= J_theta * theta_rhs;
