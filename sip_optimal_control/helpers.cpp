@@ -33,9 +33,7 @@ auto matrix_block(const double *data, const int offset, const int rows,
 void set_row_scaled(Eigen::Ref<Eigen::MatrixXd> result,
                     const Eigen::Ref<const Eigen::VectorXd> &weights,
                     const Eigen::Ref<const Eigen::MatrixXd> &matrix) {
-  for (int row = 0; row < result.rows(); ++row) {
-    result.row(row) = weights(row) * matrix.row(row);
-  }
+  result.array() = matrix.array().colwise() * weights.array();
 }
 
 void add_weighted_jacobian_products(
@@ -513,10 +511,8 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
 
     x_ip1.noalias() = -b_y_ip1_prefix;
     x_ip1.noalias() += A_i * x_i + B_i * u_i;
-    for (int row = 0; row < n; ++row) {
-      x_ip1.row(row).noalias() -= delta_ip1(row) * y_ip1.row(row);
-      x_ip1.row(row) *= sqrt_delta_ip1_inv(row);
-    }
+    x_ip1.array() -= y_ip1.array().colwise() * delta_ip1.array();
+    x_ip1.array().colwise() *= sqrt_delta_ip1_inv.array();
     F_ip1_factor.template triangularView<Eigen::Lower>().solveInPlace(x_ip1);
     F_ip1_factor.transpose()
         .template triangularView<Eigen::Upper>()
