@@ -20,6 +20,8 @@ struct NewtonKKTProblem {
   int num_stages;
   int c_dim;
   int g_dim;
+  int theta_dim;
+  int stagewise_x_dim;
   int x_dim;
   int y_dim;
   int z_dim;
@@ -37,10 +39,11 @@ struct NewtonKKTProblem {
   std::vector<double> solution;
   std::vector<double> kkt_times_solution;
 
-  NewtonKKTProblem(int n, int m, int T)
+  NewtonKKTProblem(int n, int m, int T, int p = 0)
       : state_dim(n), control_dim(m), num_stages(T), c_dim(std::max(1, n / 2)),
-        g_dim(std::max(1, 2 * m)),
-        x_dim(T * (n + m) + n), y_dim((c_dim + n) * (T + 1)),
+        g_dim(std::max(1, 2 * m)), theta_dim(p),
+        stagewise_x_dim(T * (n + m) + n), x_dim(stagewise_x_dim + p),
+        y_dim((c_dim + n) * (T + 1)),
         z_dim(g_dim * (T + 1)), kkt_dim(x_dim + y_dim + z_dim), r1(1e-8),
         input{
             .model_callback = [](const ModelCallbackInput &) {},
@@ -52,11 +55,13 @@ struct NewtonKKTProblem {
                     .control_dim = m,
                     .c_dim = c_dim,
                     .g_dim = g_dim,
+                    .theta_dim = p,
                 },
         },
         w(z_dim), r2(y_dim), r3(z_dim), rhs(kkt_dim), solution(kkt_dim),
         kkt_times_solution(kkt_dim) {
-    workspace.reserve(state_dim, control_dim, num_stages, c_dim, g_dim);
+    workspace.reserve(state_dim, control_dim, num_stages, c_dim, g_dim,
+                      theta_dim);
 
     auto rng = std::mt19937(0);
     auto normal = std::normal_distribution<double>(0.0, 1.0);
@@ -150,6 +155,7 @@ private:
                                   std::normal_distribution<double> &normal) {
     auto &mco = workspace.model_callback_output;
     mco.f = 0.0;
+    fill_zero(mco.df_dtheta, theta_dim);
 
     for (int i = 0; i < num_stages; ++i) {
       fill_zero(mco.df_dx[i], state_dim);
@@ -160,24 +166,41 @@ private:
           .diagonal()
           .array() += 1.0;
       fill_matrix(mco.ddyn_du[i], rng, normal, state_dim, control_dim, 0.1);
+      fill_matrix(mco.ddyn_dtheta[i], rng, normal, state_dim, theta_dim,
+                  1e-3);
       fill_zero(mco.c[i], c_dim);
       fill_matrix(mco.dc_dx[i], rng, normal, c_dim, state_dim, 0.1);
       fill_matrix(mco.dc_du[i], rng, normal, c_dim, control_dim, 0.1);
+      fill_matrix(mco.dc_dtheta[i], rng, normal, c_dim, theta_dim, 1e-3);
       fill_zero(mco.g[i], g_dim);
       fill_matrix(mco.dg_dx[i], rng, normal, g_dim, state_dim, 0.1);
       fill_matrix(mco.dg_du[i], rng, normal, g_dim, control_dim, 0.1);
+      fill_matrix(mco.dg_dtheta[i], rng, normal, g_dim, theta_dim, 1e-3);
       fill_spd_matrix(mco.d2L_dx2[i], rng, normal, state_dim, 1e-3);
       fill_matrix(mco.d2L_dxdu[i], rng, normal, state_dim, control_dim, 0.01);
       fill_spd_matrix(mco.d2L_du2[i], rng, normal, control_dim, 1.0);
+      fill_matrix(mco.d2L_dxdtheta[i], rng, normal, state_dim, theta_dim,
+                  1e-3);
+      fill_matrix(mco.d2L_dudtheta[i], rng, normal, control_dim, theta_dim,
+                  1e-3);
     }
 
     fill_zero(mco.df_dx[num_stages], state_dim);
     fill_zero(mco.dyn_res[num_stages], state_dim);
     fill_zero(mco.c[num_stages], c_dim);
     fill_matrix(mco.dc_dx[num_stages], rng, normal, c_dim, state_dim, 0.1);
+    fill_matrix(mco.dc_dtheta[num_stages], rng, normal, c_dim, theta_dim,
+                1e-3);
     fill_zero(mco.g[num_stages], g_dim);
     fill_matrix(mco.dg_dx[num_stages], rng, normal, g_dim, state_dim, 0.1);
+    fill_matrix(mco.dg_dtheta[num_stages], rng, normal, g_dim, theta_dim,
+                1e-3);
     fill_spd_matrix(mco.d2L_dx2[num_stages], rng, normal, state_dim, 1e-3);
+    fill_matrix(mco.d2L_dxdtheta[num_stages], rng, normal, state_dim,
+                theta_dim, 1e-3);
+    if (theta_dim > 0) {
+      fill_spd_matrix(mco.d2L_dtheta2, rng, normal, theta_dim, 100.0);
+    }
   }
 
   void fill_regularization_vectors(
@@ -199,6 +222,18 @@ void Args(benchmark::Benchmark *benchmark) {
     for (const int state_dim : {4, 6, 8, 16}) {
       for (const int control_dim : {1, 2, 3, 4}) {
         benchmark->Args({num_stages, state_dim, control_dim});
+      }
+    }
+  }
+}
+
+void ArgsTheta(benchmark::Benchmark *benchmark) {
+  for (const int num_stages : {32, 64, 128}) {
+    for (const int state_dim : {8, 16}) {
+      for (const int control_dim : {2, 4}) {
+        for (const int theta_dim : {4, 8}) {
+          benchmark->Args({num_stages, state_dim, control_dim, theta_dim});
+        }
       }
     }
   }
@@ -289,10 +324,103 @@ void BM_NewtonKKTResidual(benchmark::State &state) {
   state.counters["residual_norm"] = residual_norm;
 }
 
+void BM_NewtonKKTThetaFactor(benchmark::State &state) {
+  const int T = static_cast<int>(state.range(0));
+  const int n = static_cast<int>(state.range(1));
+  const int m = static_cast<int>(state.range(2));
+  const int p = static_cast<int>(state.range(3));
+
+  auto problem = NewtonKKTProblem(n, m, T, p);
+
+  for (auto _ : state) {
+    const bool success = problem.factor();
+    benchmark::DoNotOptimize(static_cast<int>(success));
+    if (!success) {
+      state.SkipWithError("Newton-KKT factorization failed");
+      break;
+    }
+  }
+
+  if (!problem.factor()) {
+    state.SkipWithError("Newton-KKT factorization failed");
+    return;
+  }
+  problem.solve();
+  state.counters["residual_norm"] = problem.residual_norm();
+}
+
+void BM_NewtonKKTThetaSolve(benchmark::State &state) {
+  const int T = static_cast<int>(state.range(0));
+  const int n = static_cast<int>(state.range(1));
+  const int m = static_cast<int>(state.range(2));
+  const int p = static_cast<int>(state.range(3));
+
+  auto problem = NewtonKKTProblem(n, m, T, p);
+  if (!problem.factor()) {
+    state.SkipWithError("Newton-KKT factorization failed");
+    return;
+  }
+
+  for (auto _ : state) {
+    problem.solve();
+    benchmark::DoNotOptimize(problem.solution.data());
+    benchmark::ClobberMemory();
+  }
+
+  state.counters["residual_norm"] = problem.residual_norm();
+}
+
+void BM_NewtonKKTThetaFactorSolve(benchmark::State &state) {
+  const int T = static_cast<int>(state.range(0));
+  const int n = static_cast<int>(state.range(1));
+  const int m = static_cast<int>(state.range(2));
+  const int p = static_cast<int>(state.range(3));
+
+  auto problem = NewtonKKTProblem(n, m, T, p);
+
+  for (auto _ : state) {
+    if (!problem.factor()) {
+      state.SkipWithError("Newton-KKT factorization failed");
+      break;
+    }
+    problem.solve();
+    benchmark::DoNotOptimize(problem.solution.data());
+    benchmark::ClobberMemory();
+  }
+
+  state.counters["residual_norm"] = problem.residual_norm();
+}
+
+void BM_NewtonKKTThetaResidual(benchmark::State &state) {
+  const int T = static_cast<int>(state.range(0));
+  const int n = static_cast<int>(state.range(1));
+  const int m = static_cast<int>(state.range(2));
+  const int p = static_cast<int>(state.range(3));
+
+  auto problem = NewtonKKTProblem(n, m, T, p);
+  if (!problem.factor()) {
+    state.SkipWithError("Newton-KKT factorization failed");
+    return;
+  }
+  problem.solve();
+
+  double residual_norm = 0.0;
+  for (auto _ : state) {
+    residual_norm = problem.residual_norm();
+    benchmark::DoNotOptimize(residual_norm);
+  }
+
+  state.counters["residual_norm"] = residual_norm;
+}
+
 BENCHMARK(BM_NewtonKKTFactor)->Apply(Args);
 BENCHMARK(BM_NewtonKKTSolve)->Apply(Args);
 BENCHMARK(BM_NewtonKKTFactorSolve)->Apply(Args);
 BENCHMARK(BM_NewtonKKTResidual)->Apply(Args);
+BENCHMARK(BM_NewtonKKTThetaFactor)->Apply(ArgsTheta);
+BENCHMARK(BM_NewtonKKTThetaSolve)->Apply(ArgsTheta);
+BENCHMARK(BM_NewtonKKTThetaFactorSolve)->Apply(ArgsTheta);
+BENCHMARK(BM_NewtonKKTThetaResidual)->Apply(ArgsTheta);
 
 } // namespace
 } // namespace sip::optimal_control

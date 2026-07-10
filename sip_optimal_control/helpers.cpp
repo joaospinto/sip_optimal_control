@@ -11,6 +11,33 @@ CallbackProvider::CallbackProvider(const Input &input, Workspace &workspace)
 
 namespace {
 
+using StridedMatrixMap =
+    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>,
+               Eigen::Unaligned, Eigen::OuterStride<>>;
+using ConstStridedMatrixMap =
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>,
+               Eigen::Unaligned, Eigen::OuterStride<>>;
+
+auto matrix_block(double *data, const int offset, const int rows,
+                  const int cols, const int stride) -> StridedMatrixMap {
+  return StridedMatrixMap(data + offset, rows, cols,
+                          Eigen::OuterStride<>(stride));
+}
+
+auto matrix_block(const double *data, const int offset, const int rows,
+                  const int cols, const int stride) -> ConstStridedMatrixMap {
+  return ConstStridedMatrixMap(data + offset, rows, cols,
+                               Eigen::OuterStride<>(stride));
+}
+
+void set_row_scaled(Eigen::Ref<Eigen::MatrixXd> result,
+                    const Eigen::Ref<const Eigen::VectorXd> &weights,
+                    const Eigen::Ref<const Eigen::MatrixXd> &matrix) {
+  for (int row = 0; row < result.rows(); ++row) {
+    result.row(row) = weights(row) * matrix.row(row);
+  }
+}
+
 void add_weighted_jacobian_products(
     Eigen::Ref<Eigen::MatrixXd> Q, Eigen::Ref<Eigen::MatrixXd> M,
     Eigen::Ref<Eigen::MatrixXd> R,
@@ -272,9 +299,7 @@ bool CallbackProvider::factor(const double *w, const double r1,
   auto K_inv_J_theta = Eigen::Map<Eigen::MatrixXd>(
       theta_data.theta_solution, stagewise_kkt_dim, p);
 
-  for (int j = 0; j < p; ++j) {
-    solve_stagewise_kkt(J_theta.col(j).data(), K_inv_J_theta.col(j).data());
-  }
+  solve_stagewise_kkt_matrix(J_theta.data(), K_inv_J_theta.data(), p);
 
   const auto H_theta_theta = Eigen::Map<const Eigen::MatrixXd>(
       mco.d2L_dtheta2, input_.dimensions.theta_dim, input_.dimensions.theta_dim);
@@ -292,246 +317,266 @@ bool CallbackProvider::factor(const double *w, const double r1,
 }
 
 void CallbackProvider::solve_stagewise_kkt(const double *b, double *sol) {
+  solve_stagewise_kkt_matrix(b, sol, 1);
+}
+
+void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
+                                                  const int num_rhs) {
+  const auto &dim = input_.dimensions;
+  const int T = dim.num_stages;
+  const int n = dim.state_dim;
+  const int m = dim.control_dim;
+  const int c_dim = dim.c_dim;
+  const int g_dim = dim.g_dim;
   const int x_dim = input_.dimensions.get_stagewise_x_dim();
   const int y_dim = input_.dimensions.get_y_dim();
+  const int z_dim = input_.dimensions.get_z_dim();
+  const int stagewise_kkt_dim = input_.dimensions.get_stagewise_kkt_dim();
 
-  {
-    const double *b_x = b;
-    const double *b_y = b_x + x_dim;
-    const double *b_z = b_y + y_dim;
+  const auto x_offset = [n, m](const int stage) {
+    return stage * (n + m);
+  };
+  const auto u_offset = [n, m](const int stage) {
+    return stage * (n + m) + n;
+  };
+  const auto y_prefix_offset = [x_dim, n, c_dim](const int stage) {
+    return x_dim + stage * (n + c_dim);
+  };
+  const auto y_suffix_offset = [x_dim, n, c_dim](const int stage) {
+    return x_dim + stage * (n + c_dim) + n;
+  };
+  const auto z_offset = [x_dim, y_dim, g_dim](const int stage) {
+    return x_dim + y_dim + stage * g_dim;
+  };
 
-    for (int i = 0; i < input_.dimensions.num_stages; ++i) {
-      const auto b_x_i =
-          Eigen::Map<const Eigen::VectorXd>(b_x, input_.dimensions.state_dim);
-      b_x += input_.dimensions.state_dim;
+  const auto terminal_x_rhs =
+      matrix_block(b, x_offset(T), n, num_rhs, stagewise_kkt_dim);
+  const auto terminal_y_suffix_rhs =
+      matrix_block(b, y_suffix_offset(T), c_dim, num_rhs, stagewise_kkt_dim);
+  const auto terminal_z_rhs =
+      matrix_block(b, z_offset(T), g_dim, num_rhs, stagewise_kkt_dim);
+  const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.dc_dx[T], c_dim, n);
+  const auto jac_x_g_N = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.model_callback_output.dg_dx[T], g_dim, n);
+  const auto c_r2_inv_N = Eigen::Map<const Eigen::VectorXd>(
+      workspace_.regularized_lqr_data.c_r2_inv[T], c_dim);
+  const auto mod_w_inv_N = Eigen::Map<const Eigen::VectorXd>(
+      workspace_.regularized_lqr_data.mod_w_inv[T], g_dim);
 
-      const auto b_u_i =
-          Eigen::Map<const Eigen::VectorXd>(b_x, input_.dimensions.control_dim);
-      b_x += input_.dimensions.control_dim;
+  auto v_N = matrix_block(sol, y_prefix_offset(T), n, num_rhs,
+                          stagewise_kkt_dim);
+  auto terminal_y_suffix_scratch =
+      matrix_block(sol, y_suffix_offset(T), c_dim, num_rhs, stagewise_kkt_dim);
+  auto terminal_z_scratch =
+      matrix_block(sol, z_offset(T), g_dim, num_rhs, stagewise_kkt_dim);
 
-      const auto b_y_i_prefix =
-          Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.state_dim);
-      b_y += input_.dimensions.state_dim;
+  v_N.noalias() = -terminal_x_rhs;
+  set_row_scaled(terminal_y_suffix_scratch, c_r2_inv_N,
+                 terminal_y_suffix_rhs);
+  v_N.noalias() -= jac_x_c_N.transpose() * terminal_y_suffix_scratch;
+  set_row_scaled(terminal_z_scratch, mod_w_inv_N, terminal_z_rhs);
+  v_N.noalias() -= jac_x_g_N.transpose() * terminal_z_scratch;
 
-      const auto b_y_i_suffix =
-          Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.c_dim);
-      b_y += input_.dimensions.c_dim;
-
-      const auto b_z_i =
-          Eigen::Map<const Eigen::VectorXd>(b_z, input_.dimensions.g_dim);
-      b_z += input_.dimensions.g_dim;
-
-      const auto jac_x_c_i = Eigen::Map<const Eigen::MatrixXd>(
-          workspace_.model_callback_output.dc_dx[i], input_.dimensions.c_dim,
-          input_.dimensions.state_dim);
-
-      const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
-          workspace_.model_callback_output.dg_dx[i], input_.dimensions.g_dim,
-          input_.dimensions.state_dim);
-
-      const auto jac_u_c_i = Eigen::Map<const Eigen::MatrixXd>(
-          workspace_.model_callback_output.dc_du[i], input_.dimensions.c_dim,
-          input_.dimensions.control_dim);
-
-      const auto jac_u_g_i = Eigen::Map<const Eigen::MatrixXd>(
-          workspace_.model_callback_output.dg_du[i], input_.dimensions.g_dim,
-          input_.dimensions.control_dim);
-
-      const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
-          workspace_.regularized_lqr_data.mod_w_inv[i],
-          input_.dimensions.g_dim);
-      const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
-          workspace_.regularized_lqr_data.c_r2_inv[i], input_.dimensions.c_dim);
-
-      auto q_i_mod =
-          Eigen::Map<Eigen::VectorXd>(workspace_.regularized_lqr_data.q_mod[i],
-                                      input_.dimensions.state_dim);
-
-      auto c_i_mod =
-          Eigen::Map<Eigen::VectorXd>(workspace_.regularized_lqr_data.c_mod[i],
-                                      input_.dimensions.state_dim);
-
-      auto r_i_mod =
-          Eigen::Map<Eigen::VectorXd>(workspace_.regularized_lqr_data.r_mod[i],
-                                      input_.dimensions.control_dim);
-
-      q_i_mod.noalias() =
-          -(b_x_i +
-            jac_x_c_i.transpose() *
-                c_r2_inv_i.cwiseProduct(b_y_i_suffix) +
-            jac_x_g_i.transpose() * mod_w_inv_i.cwiseProduct(b_z_i));
-
-      r_i_mod.noalias() =
-          -(b_u_i +
-            jac_u_c_i.transpose() *
-                c_r2_inv_i.cwiseProduct(b_y_i_suffix) +
-            jac_u_g_i.transpose() * mod_w_inv_i.cwiseProduct(b_z_i));
-
-      c_i_mod.noalias() = -b_y_i_prefix;
-    }
-
-    const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.model_callback_output.dc_dx[input_.dimensions.num_stages],
-        input_.dimensions.c_dim, input_.dimensions.state_dim);
-
-    const auto jac_x_g_N = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.model_callback_output.dg_dx[input_.dimensions.num_stages],
-        input_.dimensions.g_dim, input_.dimensions.state_dim);
-
-    const auto mod_w_inv_N = Eigen::Map<const Eigen::VectorXd>(
-        workspace_.regularized_lqr_data.mod_w_inv[input_.dimensions.num_stages],
-        input_.dimensions.g_dim);
-    const auto c_r2_inv_N = Eigen::Map<const Eigen::VectorXd>(
-        workspace_.regularized_lqr_data.c_r2_inv[input_.dimensions.num_stages],
-        input_.dimensions.c_dim);
-
-    const auto b_x_N =
-        Eigen::Map<const Eigen::VectorXd>(b_x, input_.dimensions.state_dim);
-
-    const auto b_y_N_prefix =
-        Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.state_dim);
-    b_y += input_.dimensions.state_dim;
-
-    const auto b_y_N_suffix =
-        Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.c_dim);
-
-    const auto b_z_N =
-        Eigen::Map<const Eigen::VectorXd>(b_z, input_.dimensions.g_dim);
-
-    auto q_N_mod = Eigen::Map<Eigen::VectorXd>(
-        workspace_.regularized_lqr_data.q_mod[input_.dimensions.num_stages],
-        input_.dimensions.state_dim);
-
-    auto c_N_mod = Eigen::Map<Eigen::VectorXd>(
-        workspace_.regularized_lqr_data.c_mod[input_.dimensions.num_stages],
-        input_.dimensions.state_dim);
-
-    q_N_mod.noalias() = -(
-        b_x_N +
-        jac_x_c_N.transpose() * c_r2_inv_N.cwiseProduct(b_y_N_suffix) +
-        jac_x_g_N.transpose() * mod_w_inv_N.cwiseProduct(b_z_N));
-
-    c_N_mod = -b_y_N_prefix;
-  }
-
-  auto &lqr_data = workspace_.regularized_lqr_data;
-  auto &lqr_output = workspace_.lqr_output;
-
-  {
-    double *sol_x = sol;
-    double *sol_y = sol_x + x_dim;
-
-    lqr_input_.q = lqr_data.q_mod;
-    lqr_input_.r = lqr_data.r_mod;
-    lqr_input_.c = lqr_data.c_mod;
-
-    for (int i = 0; i < input_.dimensions.num_stages; ++i) {
-      lqr_output.x[i] = sol_x;
-      sol_x += input_.dimensions.state_dim;
-      lqr_output.u[i] = sol_x;
-      sol_x += input_.dimensions.control_dim;
-      lqr_output.y[i] = sol_y;
-      sol_y += input_.dimensions.state_dim + input_.dimensions.c_dim;
-    }
-    lqr_output.x[input_.dimensions.num_stages] = sol_x;
-    lqr_output.y[input_.dimensions.num_stages] = sol_y;
-  }
-
-  auto lqr_solver = LQR(lqr_input_, workspace_.lqr_workspace);
-  lqr_solver.solve(lqr_output);
-
-  const double *b_y = b + x_dim;
-  const double *b_z = b_y + y_dim;
-
-  double *x = sol;
-  double *y = x + x_dim;
-  double *z = y + y_dim;
-
-  b_y += input_.dimensions.state_dim;
-  y += input_.dimensions.state_dim;
-
-  for (int i = 0; i < input_.dimensions.num_stages; ++i) {
+  for (int i = T - 1; i >= 0; --i) {
+    const auto A_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.ddyn_dx[i], n, n);
+    const auto B_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.ddyn_du[i], n, m);
     const auto jac_x_c_i = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.model_callback_output.dc_dx[i], input_.dimensions.c_dim,
-        input_.dimensions.state_dim);
-
+        workspace_.model_callback_output.dc_dx[i], c_dim, n);
     const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.model_callback_output.dg_dx[i], input_.dimensions.g_dim,
-        input_.dimensions.state_dim);
-
+        workspace_.model_callback_output.dg_dx[i], g_dim, n);
     const auto jac_u_c_i = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.model_callback_output.dc_du[i], input_.dimensions.c_dim,
-        input_.dimensions.control_dim);
-
+        workspace_.model_callback_output.dc_du[i], c_dim, m);
     const auto jac_u_g_i = Eigen::Map<const Eigen::MatrixXd>(
-        workspace_.model_callback_output.dg_du[i], input_.dimensions.g_dim,
-        input_.dimensions.control_dim);
-
-    const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
-        workspace_.regularized_lqr_data.mod_w_inv[i], input_.dimensions.g_dim);
+        workspace_.model_callback_output.dg_du[i], g_dim, m);
     const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
-        workspace_.regularized_lqr_data.c_r2_inv[i], input_.dimensions.c_dim);
+        workspace_.regularized_lqr_data.c_r2_inv[i], c_dim);
+    const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.mod_w_inv[i], g_dim);
+    const auto delta_ip1 = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.dyn_r2[i + 1], n);
+    const auto W_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.lqr_workspace.W[i], n, n);
+    const auto K_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.lqr_workspace.K[i], m, n);
+    const auto G_i_factor = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.lqr_workspace.G_factor[i], m, m);
 
+    const auto b_x_i =
+        matrix_block(b, x_offset(i), n, num_rhs, stagewise_kkt_dim);
+    const auto b_u_i =
+        matrix_block(b, u_offset(i), m, num_rhs, stagewise_kkt_dim);
     const auto b_y_i_suffix =
-        Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.c_dim);
-    b_y += input_.dimensions.state_dim + input_.dimensions.c_dim;
-
+        matrix_block(b, y_suffix_offset(i), c_dim, num_rhs, stagewise_kkt_dim);
     const auto b_z_i =
-        Eigen::Map<const Eigen::VectorXd>(b_z, input_.dimensions.g_dim);
+        matrix_block(b, z_offset(i), g_dim, num_rhs, stagewise_kkt_dim);
+    const auto b_y_ip1_prefix = matrix_block(
+        b, y_prefix_offset(i + 1), n, num_rhs, stagewise_kkt_dim);
 
-    b_z += input_.dimensions.g_dim;
+    auto v_i =
+        matrix_block(sol, y_prefix_offset(i), n, num_rhs, stagewise_kkt_dim);
+    auto v_ip1 = matrix_block(sol, y_prefix_offset(i + 1), n, num_rhs,
+                              stagewise_kkt_dim);
+    auto g_i =
+        matrix_block(sol, x_offset(i), n, num_rhs, stagewise_kkt_dim);
+    auto h_i =
+        matrix_block(sol, u_offset(i), m, num_rhs, stagewise_kkt_dim);
+    auto weighted_c_i =
+        matrix_block(sol, y_suffix_offset(i), c_dim, num_rhs,
+                     stagewise_kkt_dim);
+    auto weighted_g_i =
+        matrix_block(sol, z_offset(i), g_dim, num_rhs, stagewise_kkt_dim);
+
+    set_row_scaled(weighted_c_i, c_r2_inv_i, b_y_i_suffix);
+    set_row_scaled(weighted_g_i, mod_w_inv_i, b_z_i);
+
+    h_i.noalias() = -b_u_i;
+    h_i.noalias() -= jac_u_c_i.transpose() * weighted_c_i;
+    h_i.noalias() -= jac_u_g_i.transpose() * weighted_g_i;
+
+    set_row_scaled(v_i, delta_ip1, v_ip1);
+    v_i.noalias() += b_y_ip1_prefix;
+    g_i.noalias() = v_ip1 - W_i * v_i;
+
+    h_i.noalias() += B_i.transpose() * g_i;
+    v_i.noalias() = -b_x_i;
+    v_i.noalias() -= jac_x_c_i.transpose() * weighted_c_i;
+    v_i.noalias() -= jac_x_g_i.transpose() * weighted_g_i;
+    v_i.noalias() += A_i.transpose() * g_i + K_i.transpose() * h_i;
+
+    G_i_factor.template triangularView<Eigen::Lower>().solveInPlace(h_i);
+    G_i_factor.transpose().template triangularView<Eigen::Upper>().solveInPlace(
+        h_i);
+    h_i *= -1.0;
+  }
+
+  auto x_0 = matrix_block(sol, x_offset(0), n, num_rhs, stagewise_kkt_dim);
+  auto y_0 = matrix_block(sol, y_prefix_offset(0), n, num_rhs,
+                          stagewise_kkt_dim);
+  const auto b_y_0_prefix =
+      matrix_block(b, y_prefix_offset(0), n, num_rhs, stagewise_kkt_dim);
+  const auto delta_0 = Eigen::Map<const Eigen::VectorXd>(
+      workspace_.regularized_lqr_data.dyn_r2[0], n);
+  const auto F_0_factor = Eigen::Map<const Eigen::MatrixXd>(
+      workspace_.lqr_workspace.F_factor[0], n, n);
+  const auto sqrt_delta_0 = Eigen::Map<const Eigen::VectorXd>(
+      workspace_.lqr_workspace.sqrt_delta[0], n);
+  const auto sqrt_delta_0_inv = Eigen::Map<const Eigen::VectorXd>(
+      workspace_.lqr_workspace.sqrt_delta_inv[0], n);
+  const auto V_0 =
+      Eigen::Map<const Eigen::MatrixXd>(workspace_.lqr_workspace.V[0], n, n);
+
+  set_row_scaled(x_0, delta_0, y_0);
+  x_0.noalias() += b_y_0_prefix;
+  set_row_scaled(x_0, sqrt_delta_0_inv, x_0);
+  F_0_factor.template triangularView<Eigen::Lower>().solveInPlace(x_0);
+  F_0_factor.transpose().template triangularView<Eigen::Upper>().solveInPlace(
+      x_0);
+  set_row_scaled(x_0, sqrt_delta_0, x_0);
+  x_0 *= -1.0;
+
+  y_0.noalias() += V_0 * x_0;
+
+  for (int i = 0; i < T; ++i) {
+    const auto A_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.ddyn_dx[i], n, n);
+    const auto B_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.ddyn_du[i], n, m);
+    const auto K_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.lqr_workspace.K[i], m, n);
+    const auto V_ip1 =
+        Eigen::Map<const Eigen::MatrixXd>(workspace_.lqr_workspace.V[i + 1], n,
+                                          n);
+    const auto F_ip1_factor = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.lqr_workspace.F_factor[i + 1], n, n);
+    const auto sqrt_delta_ip1 = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.lqr_workspace.sqrt_delta[i + 1], n);
+    const auto sqrt_delta_ip1_inv = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.lqr_workspace.sqrt_delta_inv[i + 1], n);
+    const auto delta_ip1 = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.dyn_r2[i + 1], n);
 
     const auto x_i =
-        Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.state_dim);
-    x += input_.dimensions.state_dim;
+        matrix_block(sol, x_offset(i), n, num_rhs, stagewise_kkt_dim);
+    auto u_i =
+        matrix_block(sol, u_offset(i), m, num_rhs, stagewise_kkt_dim);
+    auto x_ip1 =
+        matrix_block(sol, x_offset(i + 1), n, num_rhs, stagewise_kkt_dim);
+    auto y_ip1 = matrix_block(sol, y_prefix_offset(i + 1), n, num_rhs,
+                              stagewise_kkt_dim);
+    const auto b_y_ip1_prefix = matrix_block(
+        b, y_prefix_offset(i + 1), n, num_rhs, stagewise_kkt_dim);
 
-    const auto u_i =
-        Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.control_dim);
-    x += input_.dimensions.control_dim;
+    u_i.noalias() += K_i * x_i;
 
-    auto y_i_suffix = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.c_dim);
-    y += input_.dimensions.state_dim + input_.dimensions.c_dim;
+    x_ip1.noalias() = -b_y_ip1_prefix;
+    x_ip1.noalias() += A_i * x_i + B_i * u_i;
+    for (int row = 0; row < n; ++row) {
+      x_ip1.row(row).noalias() -= delta_ip1(row) * y_ip1.row(row);
+      x_ip1.row(row) *= sqrt_delta_ip1_inv(row);
+    }
+    F_ip1_factor.template triangularView<Eigen::Lower>().solveInPlace(x_ip1);
+    F_ip1_factor.transpose()
+        .template triangularView<Eigen::Upper>()
+        .solveInPlace(x_ip1);
+    set_row_scaled(x_ip1, sqrt_delta_ip1, x_ip1);
 
-    auto z_i = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
-    z += input_.dimensions.g_dim;
-
-    y_i_suffix.noalias() = c_r2_inv_i.cwiseProduct(
-        jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix);
-
-    z_i.noalias() = mod_w_inv_i.cwiseProduct(jac_x_g_i * x_i +
-                                             jac_u_g_i * u_i - b_z_i);
+    y_ip1.noalias() += V_ip1 * x_ip1;
   }
 
-  const auto x_N =
-      Eigen::Map<const Eigen::VectorXd>(x, input_.dimensions.state_dim);
+  for (int i = 0; i < T; ++i) {
+    const auto jac_x_c_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dc_dx[i], c_dim, n);
+    const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dg_dx[i], g_dim, n);
+    const auto jac_u_c_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dc_du[i], c_dim, m);
+    const auto jac_u_g_i = Eigen::Map<const Eigen::MatrixXd>(
+        workspace_.model_callback_output.dg_du[i], g_dim, m);
+    const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.c_r2_inv[i], c_dim);
+    const auto mod_w_inv_i = Eigen::Map<const Eigen::VectorXd>(
+        workspace_.regularized_lqr_data.mod_w_inv[i], g_dim);
+    const auto x_i =
+        matrix_block(sol, x_offset(i), n, num_rhs, stagewise_kkt_dim);
+    const auto u_i =
+        matrix_block(sol, u_offset(i), m, num_rhs, stagewise_kkt_dim);
+    const auto b_y_i_suffix =
+        matrix_block(b, y_suffix_offset(i), c_dim, num_rhs, stagewise_kkt_dim);
+    const auto b_z_i =
+        matrix_block(b, z_offset(i), g_dim, num_rhs, stagewise_kkt_dim);
+    auto y_i_suffix =
+        matrix_block(sol, y_suffix_offset(i), c_dim, num_rhs,
+                     stagewise_kkt_dim);
+    auto z_i =
+        matrix_block(sol, z_offset(i), g_dim, num_rhs, stagewise_kkt_dim);
 
-  const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
-      workspace_.model_callback_output.dc_dx[input_.dimensions.num_stages],
-      input_.dimensions.c_dim, input_.dimensions.state_dim);
+    y_i_suffix.noalias() = jac_x_c_i * x_i + jac_u_c_i * u_i - b_y_i_suffix;
+    set_row_scaled(y_i_suffix, c_r2_inv_i, y_i_suffix);
+    z_i.noalias() = jac_x_g_i * x_i + jac_u_g_i * u_i - b_z_i;
+    set_row_scaled(z_i, mod_w_inv_i, z_i);
+  }
 
-  const auto jac_x_g_N = Eigen::Map<const Eigen::MatrixXd>(
-      workspace_.model_callback_output.dg_dx[input_.dimensions.num_stages],
-      input_.dimensions.g_dim, input_.dimensions.state_dim);
-
+  const auto x_N = matrix_block(sol, x_offset(T), n, num_rhs,
+                                stagewise_kkt_dim);
   const auto b_y_N_suffix =
-      Eigen::Map<const Eigen::VectorXd>(b_y, input_.dimensions.c_dim);
-
+      matrix_block(b, y_suffix_offset(T), c_dim, num_rhs, stagewise_kkt_dim);
   const auto b_z_N =
-      Eigen::Map<const Eigen::VectorXd>(b_z, input_.dimensions.g_dim);
+      matrix_block(b, z_offset(T), g_dim, num_rhs, stagewise_kkt_dim);
+  auto y_N_suffix =
+      matrix_block(sol, y_suffix_offset(T), c_dim, num_rhs,
+                   stagewise_kkt_dim);
+  auto z_N =
+      matrix_block(sol, z_offset(T), g_dim, num_rhs, stagewise_kkt_dim);
 
-  const auto mod_w_inv_N = Eigen::Map<const Eigen::VectorXd>(
-      workspace_.regularized_lqr_data.mod_w_inv[input_.dimensions.num_stages],
-      input_.dimensions.g_dim);
-  const auto c_r2_inv_N = Eigen::Map<const Eigen::VectorXd>(
-      workspace_.regularized_lqr_data.c_r2_inv[input_.dimensions.num_stages],
-      input_.dimensions.c_dim);
+  y_N_suffix.noalias() = jac_x_c_N * x_N - b_y_N_suffix;
+  set_row_scaled(y_N_suffix, c_r2_inv_N, y_N_suffix);
+  z_N.noalias() = jac_x_g_N * x_N - b_z_N;
+  set_row_scaled(z_N, mod_w_inv_N, z_N);
 
-  auto y_N_suffix = Eigen::Map<Eigen::VectorXd>(y, input_.dimensions.c_dim);
-  y_N_suffix.noalias() =
-      c_r2_inv_N.cwiseProduct(jac_x_c_N * x_N - b_y_N_suffix);
-
-  auto z_N = Eigen::Map<Eigen::VectorXd>(z, input_.dimensions.g_dim);
-  z_N.noalias() = mod_w_inv_N.cwiseProduct(jac_x_g_N * x_N - b_z_N);
+  (void)z_dim;
 }
 
 void CallbackProvider::solve(const double *b, double *sol) {

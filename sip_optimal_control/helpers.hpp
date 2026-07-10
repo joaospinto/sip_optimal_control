@@ -23,6 +23,7 @@ public:
 private:
   void form_theta_jacobian();
   void solve_stagewise_kkt(const double *b, double *sol);
+  void solve_stagewise_kkt_matrix(const double *b, double *sol, int num_rhs);
 
   const Input &input_;
   Workspace &workspace_;
