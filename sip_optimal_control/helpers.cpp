@@ -10,6 +10,57 @@ namespace sip::optimal_control {
 CallbackProvider::CallbackProvider(const Input &input, Workspace &workspace)
     : input_(input), workspace_(workspace) {}
 
+namespace {
+
+void add_weighted_jacobian_products(
+    Eigen::Ref<Eigen::MatrixXd> Q, Eigen::Ref<Eigen::MatrixXd> M,
+    Eigen::Ref<Eigen::MatrixXd> R,
+    const Eigen::Ref<const Eigen::MatrixXd> &J_x,
+    const Eigen::Ref<const Eigen::MatrixXd> &J_u,
+    const Eigen::Ref<const Eigen::VectorXd> &weights) {
+  for (int constraint = 0; constraint < weights.size(); ++constraint) {
+    const double weight = weights(constraint);
+
+    for (int col = 0; col < Q.cols(); ++col) {
+      const double weighted_j_x_col = weight * J_x(constraint, col);
+      for (int row = 0; row < Q.rows(); ++row) {
+        Q(row, col) += weighted_j_x_col * J_x(constraint, row);
+      }
+    }
+
+    for (int col = 0; col < M.cols(); ++col) {
+      const double weighted_j_u_col = weight * J_u(constraint, col);
+      for (int row = 0; row < M.rows(); ++row) {
+        M(row, col) += J_x(constraint, row) * weighted_j_u_col;
+      }
+    }
+
+    for (int col = 0; col < R.cols(); ++col) {
+      const double weighted_j_u_col = weight * J_u(constraint, col);
+      for (int row = 0; row < R.rows(); ++row) {
+        R(row, col) += weighted_j_u_col * J_u(constraint, row);
+      }
+    }
+  }
+}
+
+void add_weighted_state_jacobian_product(
+    Eigen::Ref<Eigen::MatrixXd> Q,
+    const Eigen::Ref<const Eigen::MatrixXd> &J_x,
+    const Eigen::Ref<const Eigen::VectorXd> &weights) {
+  for (int constraint = 0; constraint < weights.size(); ++constraint) {
+    const double weight = weights(constraint);
+    for (int col = 0; col < Q.cols(); ++col) {
+      const double weighted_j_x_col = weight * J_x(constraint, col);
+      for (int row = 0; row < Q.rows(); ++row) {
+        Q(row, col) += weighted_j_x_col * J_x(constraint, row);
+      }
+    }
+  }
+}
+
+} // namespace
+
 void CallbackProvider::form_theta_jacobian() {
   const auto &dim = input_.dimensions;
   const auto &mco = workspace_.model_callback_output;
@@ -132,17 +183,16 @@ bool CallbackProvider::factor(const double *w, const double r1,
 
     Q_i_mod.noalias() = Q_i;
     Q_i_mod.diagonal().array() += r1;
-    Q_i_mod += jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_x_c_i;
-    Q_i_mod += jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_x_g_i;
 
-    M_i_mod.noalias() =
-        M_i + jac_x_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_u_c_i +
-        jac_x_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
+    M_i_mod.noalias() = M_i;
 
     R_i_mod.noalias() = R_i;
     R_i_mod.diagonal().array() += r1;
-    R_i_mod += jac_u_c_i.transpose() * c_r2_inv_i.asDiagonal() * jac_u_c_i;
-    R_i_mod += jac_u_g_i.transpose() * mod_w_inv_i.asDiagonal() * jac_u_g_i;
+
+    add_weighted_jacobian_products(Q_i_mod, M_i_mod, R_i_mod, jac_x_c_i,
+                                   jac_u_c_i, c_r2_inv_i);
+    add_weighted_jacobian_products(Q_i_mod, M_i_mod, R_i_mod, jac_x_g_i,
+                                   jac_u_g_i, mod_w_inv_i);
   }
 
   const auto jac_x_c_N = Eigen::Map<const Eigen::MatrixXd>(
@@ -178,8 +228,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
 
   Q_N_mod.noalias() = Q_N;
   Q_N_mod.diagonal().array() += r1;
-  Q_N_mod += jac_x_c_N.transpose() * c_r2_inv_N.asDiagonal() * jac_x_c_N;
-  Q_N_mod += jac_x_g_N.transpose() * mod_w_inv_N.asDiagonal() * jac_x_g_N;
+  add_weighted_state_jacobian_product(Q_N_mod, jac_x_c_N, c_r2_inv_N);
+  add_weighted_state_jacobian_product(Q_N_mod, jac_x_g_N, mod_w_inv_N);
 
   lqr_input_.Q = lqr_data.Q_mod;
   lqr_input_.M = lqr_data.M_mod;
