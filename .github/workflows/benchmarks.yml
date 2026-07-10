@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   benchmark:
-    name: LQR benchmark (${{ matrix.os }})
+    name: Benchmarks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -42,6 +42,12 @@ jobs:
           --benchmark_out="$PWD/benchmark-results/lqr-${{ runner.os }}.json" \
           --benchmark_out_format=json \
           | tee "benchmark-results/lqr-${{ runner.os }}.txt"
+        bazel run //benchmarks:newton_kkt_benchmark -- \
+          --benchmark_min_time=0.01s \
+          --benchmark_repetitions=1 \
+          --benchmark_out="$PWD/benchmark-results/newton-kkt-${{ runner.os }}.json" \
+          --benchmark_out_format=json \
+          | tee "benchmark-results/newton-kkt-${{ runner.os }}.txt"
 
     - name: Summarize benchmarks
       shell: bash
@@ -52,9 +58,15 @@ jobs:
           echo '```text'
           cat "benchmark-results/lqr-${{ runner.os }}.txt"
           echo '```'
+          echo
+          echo "## Newton-KKT benchmark (${{ runner.os }})"
+          echo
+          echo '```text'
+          cat "benchmark-results/newton-kkt-${{ runner.os }}.txt"
+          echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
 
     - uses: actions/upload-artifact@v7
       with:
-        name: lqr-benchmark-${{ runner.os }}
+        name: benchmarks-${{ runner.os }}
         path: benchmark-results/*

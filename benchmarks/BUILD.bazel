@@ -10,3 +10,14 @@ cc_binary(
         "@google_benchmark//:benchmark_main",
     ],
 )
+
+cc_binary(
+    name = "newton_kkt_benchmark",
+    srcs = ["newton_kkt_benchmark.cpp"],
+    linkstatic = True,
+    deps = [
+        "//sip_optimal_control:helpers",
+        "@eigen",
+        "@google_benchmark//:benchmark_main",
+    ],
+)
