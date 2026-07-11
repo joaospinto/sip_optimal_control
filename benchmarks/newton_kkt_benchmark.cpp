@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <string>
 #include <vector>
@@ -14,20 +15,31 @@
 namespace sip::optimal_control {
 namespace {
 
+auto consecutive_integers(const int size, const int first) -> std::vector<int> {
+  std::vector<int> values(size);
+  std::iota(values.begin(), values.end(), first);
+  return values;
+}
+
 struct NewtonKKTProblem {
   int state_dim;
   int control_dim;
-  int num_stages;
+  int num_edges;
   int c_dim;
   int g_dim;
   int theta_dim;
-  int stagewise_x_dim;
   int x_dim;
   int y_dim;
   int z_dim;
   int kkt_dim;
   double r1;
 
+  std::vector<int> state_dims;
+  std::vector<int> control_dims;
+  std::vector<int> c_dims;
+  std::vector<int> g_dims;
+  std::vector<int> edge_parents;
+  std::vector<int> edge_children;
   Workspace workspace;
   Input input;
   std::unique_ptr<CallbackProvider> callback_provider;
@@ -40,28 +52,24 @@ struct NewtonKKTProblem {
   std::vector<double> kkt_times_solution;
 
   NewtonKKTProblem(int n, int m, int T, int p = 0)
-      : state_dim(n), control_dim(m), num_stages(T), c_dim(std::max(1, n / 2)),
-        g_dim(std::max(1, 2 * m)), theta_dim(p),
-        stagewise_x_dim(T * (n + m) + n), x_dim(stagewise_x_dim + p),
-        y_dim((c_dim + n) * (T + 1)),
-        z_dim(g_dim * (T + 1)), kkt_dim(x_dim + y_dim + z_dim), r1(1e-8),
+      : state_dim(n), control_dim(m), num_edges(T), c_dim(std::max(1, n / 2)),
+        g_dim(std::max(1, 2 * m)), theta_dim(p), x_dim(T * (n + m) + n + p),
+        y_dim((c_dim + n) * (T + 1)), z_dim(g_dim * (T + 1)),
+        kkt_dim(x_dim + y_dim + z_dim), r1(1e-8), state_dims(T + 1, n),
+        control_dims(T, m), c_dims(T + 1, c_dim), g_dims(T + 1, g_dim),
+        edge_parents(consecutive_integers(T, 0)),
+        edge_children(consecutive_integers(T, 1)),
         input{
+            .dimensions = {theta_dim, state_dims.data(), control_dims.data(),
+                           c_dims.data(), g_dims.data()},
+            .topology = {num_edges, 0, edge_parents.data(),
+                         edge_children.data()},
             .model_callback = [](const ModelCallbackInput &) {},
             .timeout_callback = []() -> bool { return false; },
-            .dimensions =
-                {
-                    .num_stages = T,
-                    .state_dim = n,
-                    .control_dim = m,
-                    .c_dim = c_dim,
-                    .g_dim = g_dim,
-                    .theta_dim = p,
-                },
         },
         w(z_dim), r2(y_dim), r3(z_dim), rhs(kkt_dim), solution(kkt_dim),
         kkt_times_solution(kkt_dim) {
-    workspace.reserve(state_dim, control_dim, num_stages, c_dim, g_dim,
-                      theta_dim);
+    workspace.reserve(input.dimensions, input.topology);
 
     auto rng = std::mt19937(0);
     auto normal = std::normal_distribution<double>(0.0, 1.0);
@@ -74,7 +82,7 @@ struct NewtonKKTProblem {
     callback_provider = std::make_unique<CallbackProvider>(input, workspace);
   }
 
-  ~NewtonKKTProblem() { workspace.free(num_stages); }
+  ~NewtonKKTProblem() { workspace.free(input.topology); }
 
   NewtonKKTProblem(const NewtonKKTProblem &) = delete;
   auto operator=(const NewtonKKTProblem &) -> NewtonKKTProblem & = delete;
@@ -132,8 +140,7 @@ private:
 
   static void fill_matrix(double *data, std::mt19937 &rng,
                           std::normal_distribution<double> &normal,
-                          const int rows, const int cols,
-                          const double scale) {
+                          const int rows, const int cols, const double scale) {
     auto matrix = Eigen::Map<Eigen::MatrixXd>(data, rows, cols);
     matrix.noalias() = scale * random_matrix(rng, normal, rows, cols);
   }
@@ -157,7 +164,7 @@ private:
     mco.f = 0.0;
     fill_zero(mco.df_dtheta, theta_dim);
 
-    for (int i = 0; i < num_stages; ++i) {
+    for (int i = 0; i < num_edges; ++i) {
       fill_zero(mco.df_dx[i], state_dim);
       fill_zero(mco.df_du[i], control_dim);
       fill_zero(mco.dyn_res[i], state_dim);
@@ -166,8 +173,7 @@ private:
           .diagonal()
           .array() += 1.0;
       fill_matrix(mco.ddyn_du[i], rng, normal, state_dim, control_dim, 0.1);
-      fill_matrix(mco.ddyn_dtheta[i], rng, normal, state_dim, theta_dim,
-                  1e-3);
+      fill_matrix(mco.ddyn_dtheta[i], rng, normal, state_dim, theta_dim, 1e-3);
       fill_zero(mco.c[i], c_dim);
       fill_matrix(mco.dc_dx[i], rng, normal, c_dim, state_dim, 0.1);
       fill_matrix(mco.dc_du[i], rng, normal, c_dim, control_dim, 0.1);
@@ -179,32 +185,30 @@ private:
       fill_spd_matrix(mco.d2L_dx2[i], rng, normal, state_dim, 1e-3);
       fill_matrix(mco.d2L_dxdu[i], rng, normal, state_dim, control_dim, 0.01);
       fill_spd_matrix(mco.d2L_du2[i], rng, normal, control_dim, 1.0);
-      fill_matrix(mco.d2L_dxdtheta[i], rng, normal, state_dim, theta_dim,
-                  1e-3);
+      fill_matrix(mco.d2L_dxdtheta[i], rng, normal, state_dim, theta_dim, 1e-3);
       fill_matrix(mco.d2L_dudtheta[i], rng, normal, control_dim, theta_dim,
                   1e-3);
     }
 
-    fill_zero(mco.df_dx[num_stages], state_dim);
-    fill_zero(mco.dyn_res[num_stages], state_dim);
-    fill_zero(mco.c[num_stages], c_dim);
-    fill_matrix(mco.dc_dx[num_stages], rng, normal, c_dim, state_dim, 0.1);
-    fill_matrix(mco.dc_dtheta[num_stages], rng, normal, c_dim, theta_dim,
+    fill_zero(mco.df_dx[num_edges], state_dim);
+    fill_zero(mco.dyn_res[num_edges], state_dim);
+    fill_zero(mco.c[num_edges], c_dim);
+    fill_matrix(mco.dc_dx[num_edges], rng, normal, c_dim, state_dim, 0.1);
+    fill_matrix(mco.dc_dtheta[num_edges], rng, normal, c_dim, theta_dim, 1e-3);
+    fill_zero(mco.g[num_edges], g_dim);
+    fill_matrix(mco.dg_dx[num_edges], rng, normal, g_dim, state_dim, 0.1);
+    fill_matrix(mco.dg_dtheta[num_edges], rng, normal, g_dim, theta_dim, 1e-3);
+    fill_spd_matrix(mco.d2L_dx2[num_edges], rng, normal, state_dim, 1e-3);
+    fill_matrix(mco.d2L_dxdtheta[num_edges], rng, normal, state_dim, theta_dim,
                 1e-3);
-    fill_zero(mco.g[num_stages], g_dim);
-    fill_matrix(mco.dg_dx[num_stages], rng, normal, g_dim, state_dim, 0.1);
-    fill_matrix(mco.dg_dtheta[num_stages], rng, normal, g_dim, theta_dim,
-                1e-3);
-    fill_spd_matrix(mco.d2L_dx2[num_stages], rng, normal, state_dim, 1e-3);
-    fill_matrix(mco.d2L_dxdtheta[num_stages], rng, normal, state_dim,
-                theta_dim, 1e-3);
     if (theta_dim > 0) {
       fill_spd_matrix(mco.d2L_dtheta2, rng, normal, theta_dim, 100.0);
     }
   }
 
-  void fill_regularization_vectors(
-      std::mt19937 &rng, std::uniform_real_distribution<double> &unit) {
+  void
+  fill_regularization_vectors(std::mt19937 &rng,
+                              std::uniform_real_distribution<double> &unit) {
     for (double &value : r2) {
       value = positive_log_uniform(rng, unit, 1e-3, 1e9);
     }
@@ -218,21 +222,21 @@ private:
 };
 
 void Args(benchmark::Benchmark *benchmark) {
-  for (const int num_stages : {16, 32, 64, 128}) {
+  for (const int num_edges : {16, 32, 64, 128}) {
     for (const int state_dim : {4, 6, 8, 16}) {
       for (const int control_dim : {1, 2, 3, 4}) {
-        benchmark->Args({num_stages, state_dim, control_dim});
+        benchmark->Args({num_edges, state_dim, control_dim});
       }
     }
   }
 }
 
 void ArgsTheta(benchmark::Benchmark *benchmark) {
-  for (const int num_stages : {32, 64, 128}) {
+  for (const int num_edges : {32, 64, 128}) {
     for (const int state_dim : {8, 16}) {
       for (const int control_dim : {2, 4}) {
         for (const int theta_dim : {4, 8}) {
-          benchmark->Args({num_stages, state_dim, control_dim, theta_dim});
+          benchmark->Args({num_edges, state_dim, control_dim, theta_dim});
         }
       }
     }

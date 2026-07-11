@@ -14,7 +14,13 @@ namespace {
 struct LQRProblem {
   int state_dim = 2;
   int control_dim = 1;
-  int num_stages = 2;
+  int num_edges = 2;
+  std::vector<int> state_dims;
+  std::vector<int> control_dims;
+  std::vector<int> edge_parents;
+  std::vector<int> edge_children;
+  Dimensions input_dimensions;
+  Topology input_topology;
 
   std::vector<Eigen::MatrixXd> Q;
   std::vector<Eigen::MatrixXd> M;
@@ -37,10 +43,19 @@ struct LQRProblem {
   std::vector<double *> delta_ptr;
 
   LQRProblem(int n, int m, int T)
-      : state_dim(n), control_dim(m), num_stages(T), Q(T + 1), M(T), R(T), A(T),
+      : state_dim(n), control_dim(m), num_edges(T), state_dims(T + 1, n),
+        control_dims(T, m), edge_parents(T), edge_children(T), Q(T + 1), M(T), R(T), A(T),
         B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1), M_ptr(T),
         R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T), c_ptr(T + 1),
         delta_ptr(T + 1) {
+    for (int edge = 0; edge < T; ++edge) {
+      edge_parents[edge] = edge;
+      edge_children[edge] = edge + 1;
+    }
+    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
+                                  nullptr, nullptr};
+    input_topology = Topology{num_edges, 0, edge_parents.data(),
+                              edge_children.data()};
     for (int i = 0; i <= T; ++i) {
       Q[i] = Eigen::MatrixXd::Identity(n, n);
       q[i] = Eigen::VectorXd::Zero(n);
@@ -60,13 +75,13 @@ struct LQRProblem {
   }
 
   void refresh_pointers() {
-    for (int i = 0; i <= num_stages; ++i) {
+    for (int i = 0; i <= num_edges; ++i) {
       Q_ptr[i] = Q[i].data();
       q_ptr[i] = q[i].data();
       c_ptr[i] = c[i].data();
       delta_ptr[i] = delta[i].data();
     }
-    for (int i = 0; i < num_stages; ++i) {
+    for (int i = 0; i < num_edges; ++i) {
       M_ptr[i] = M[i].data();
       R_ptr[i] = R[i].data();
       A_ptr[i] = A[i].data();
@@ -87,12 +102,8 @@ struct LQRProblem {
         .B = B_ptr.data(),
         .c = c_ptr.data(),
         .delta = delta_ptr.data(),
-        .dimensions =
-            {
-                .state_dim = state_dim,
-                .control_dim = control_dim,
-                .num_stages = num_stages,
-            },
+        .dimensions = input_dimensions,
+        .topology = input_topology,
     };
   }
 };
@@ -131,16 +142,16 @@ struct LQROutputStorage {
 auto factor_status(LQRProblem &problem) -> LQR::FactorStatus {
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(problem.state_dim, problem.control_dim, problem.num_stages);
+  workspace.reserve(problem.state_dim, problem.control_dim, problem.num_edges);
   auto lqr = LQR(input, workspace);
   const auto status = lqr.factor_with_status();
-  workspace.free(problem.num_stages);
+  workspace.free(problem.num_edges);
   return status;
 }
 
 auto compute_residual_norm(const LQRProblem &problem,
                            const LQROutputStorage &output) -> double {
-  const int T = problem.num_stages;
+  const int T = problem.num_edges;
   double squared_norm = 0.0;
 
   for (int i = 0; i < T; ++i) {
@@ -163,8 +174,8 @@ auto compute_residual_norm(const LQRProblem &problem,
   }
 
   const Eigen::VectorXd terminal_stationarity =
-      problem.Q[T].selfadjointView<Eigen::Lower>() * output.x[T] -
-      output.y[T] + problem.q[T];
+      problem.Q[T].selfadjointView<Eigen::Lower>() * output.x[T] - output.y[T] +
+      problem.q[T];
   const Eigen::VectorXd initial_dynamics =
       -output.x[0] - problem.delta[0].cwiseProduct(output.y[0]) + problem.c[0];
 
@@ -184,32 +195,32 @@ TEST(LQRFactor, BoolFactorWrapsStatusApi) {
   auto problem = LQRProblem(/*n=*/2, /*m=*/1, /*T=*/2);
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(problem.state_dim, problem.control_dim, problem.num_stages);
+  workspace.reserve(problem.state_dim, problem.control_dim, problem.num_edges);
   auto lqr = LQR(input, workspace);
 
   EXPECT_TRUE(lqr.factor());
 
-  workspace.free(problem.num_stages);
+  workspace.free(problem.num_edges);
 }
 
 TEST(LQRFactor, ReportsInvalidDelta) {
   auto problem = LQRProblem(/*n=*/2, /*m=*/1, /*T=*/2);
-  problem.delta[problem.num_stages](0) = 0.0;
+  problem.delta[problem.num_edges](0) = 0.0;
 
   EXPECT_EQ(factor_status(problem), LQR::FactorStatus::INVALID_DELTA);
 }
 
 TEST(LQRFactor, ReportsFFactorizationFailure) {
   auto problem = LQRProblem(/*n=*/1, /*m=*/1, /*T=*/1);
-  problem.Q[problem.num_stages](0, 0) = -2.0;
-  problem.delta[problem.num_stages](0) = 1.0;
+  problem.Q[problem.num_edges](0, 0) = -2.0;
+  problem.delta[problem.num_edges](0) = 1.0;
 
   EXPECT_EQ(factor_status(problem), LQR::FactorStatus::F_FACTORIZATION_FAILURE);
 }
 
 TEST(LQRFactor, ReportsGFactorizationFailure) {
   auto problem = LQRProblem(/*n=*/1, /*m=*/1, /*T=*/1);
-  problem.Q[problem.num_stages](0, 0) = 0.0;
+  problem.Q[problem.num_edges](0, 0) = 0.0;
   problem.R[0](0, 0) = -1.0;
 
   EXPECT_EQ(factor_status(problem), LQR::FactorStatus::G_FACTORIZATION_FAILURE);
@@ -218,7 +229,7 @@ TEST(LQRFactor, ReportsGFactorizationFailure) {
 TEST(LQRSolve, SolvesNonuniformDiagonalDeltaProblem) {
   auto problem = LQRProblem(/*n=*/3, /*m=*/2, /*T=*/3);
 
-  for (int i = 0; i < problem.num_stages; ++i) {
+  for (int i = 0; i < problem.num_edges; ++i) {
     problem.A[i] << 1.0 + 0.02 * i, 0.03, -0.01, -0.02, 0.95 + 0.01 * i, 0.04,
         0.01, -0.03, 1.02 - 0.01 * i;
     problem.B[i] << 0.2, -0.1, 0.05, 0.15, -0.1, 0.08;
@@ -230,50 +241,30 @@ TEST(LQRSolve, SolvesNonuniformDiagonalDeltaProblem) {
     problem.delta[i] << 0.03 + 0.01 * i, 0.11 + 0.02 * i, 0.19 + 0.03 * i;
   }
 
-  problem.Q[problem.num_stages].diagonal() << 1.3, 1.7, 2.1;
-  problem.q[problem.num_stages] << 0.06, -0.08, 0.12;
-  problem.c[problem.num_stages] << -0.02, 0.05, -0.01;
-  problem.delta[problem.num_stages] << 0.07, 0.17, 0.29;
+  problem.Q[problem.num_edges].diagonal() << 1.3, 1.7, 2.1;
+  problem.q[problem.num_edges] << 0.06, -0.08, 0.12;
+  problem.c[problem.num_edges] << -0.02, 0.05, -0.01;
+  problem.delta[problem.num_edges] << 0.07, 0.17, 0.29;
 
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(problem.state_dim, problem.control_dim, problem.num_stages);
+  workspace.reserve(problem.state_dim, problem.control_dim, problem.num_edges);
   auto lqr = LQR(input, workspace);
   ASSERT_EQ(lqr.factor_with_status(), LQR::FactorStatus::SUCCESS);
 
   auto output_storage = LQROutputStorage(problem.state_dim, problem.control_dim,
-                                         problem.num_stages);
+                                         problem.num_edges);
   auto output = output_storage.output();
   lqr.solve(output);
 
   EXPECT_LT(compute_residual_norm(problem, output_storage), 1e-12);
 
-  workspace.free(problem.num_stages);
+  workspace.free(problem.num_edges);
 }
 
 struct BranchTopology {
   int parent[2] = {0, 0};
   int child[2] = {1, 2};
-  mutable int root_calls = 0;
-  mutable int edge_parent_calls = 0;
-  mutable int edge_child_calls = 0;
-
-  static auto root(const void *context) -> int {
-    ++static_cast<const BranchTopology *>(context)->root_calls;
-    return 0;
-  }
-
-  static auto edge_parent(const void *context, const int edge) -> int {
-    const auto *topology = static_cast<const BranchTopology *>(context);
-    ++topology->edge_parent_calls;
-    return topology->parent[edge];
-  }
-
-  static auto edge_child(const void *context, const int edge) -> int {
-    const auto *topology = static_cast<const BranchTopology *>(context);
-    ++topology->edge_child_calls;
-    return topology->child[edge];
-  }
 };
 
 struct BranchLQRProblem {
@@ -281,6 +272,10 @@ struct BranchLQRProblem {
   int control_dim = 1;
   int num_edges = 2;
   BranchTopology topology;
+  std::array<int, 3> state_dims = {2, 2, 2};
+  std::array<int, 2> control_dims = {1, 1};
+  Dimensions input_dimensions;
+  Topology input_topology;
 
   std::vector<Eigen::MatrixXd> Q;
   std::vector<Eigen::MatrixXd> M;
@@ -303,9 +298,9 @@ struct BranchLQRProblem {
   std::vector<double *> delta_ptr;
 
   BranchLQRProblem()
-      : Q(3), M(2), R(2), A(2), B(2), q(3), r(2), c(3), delta(3),
-        Q_ptr(3), M_ptr(2), R_ptr(2), A_ptr(2), B_ptr(2), q_ptr(3), r_ptr(2),
-        c_ptr(3), delta_ptr(3) {
+      : Q(3), M(2), R(2), A(2), B(2), q(3), r(2), c(3), delta(3), Q_ptr(3),
+        M_ptr(2), R_ptr(2), A_ptr(2), B_ptr(2), q_ptr(3), r_ptr(2), c_ptr(3),
+        delta_ptr(3) {
     Q[0] = (Eigen::Matrix2d() << 2.0, 0.1, 0.1, 1.5).finished();
     Q[1] = (Eigen::Matrix2d() << 1.3, 0.2, 0.2, 1.7).finished();
     Q[2] = (Eigen::Matrix2d() << 1.8, -0.1, -0.1, 1.4).finished();
@@ -334,6 +329,9 @@ struct BranchLQRProblem {
     delta[2] = (Eigen::Vector2d() << 1.0, 0.6).finished();
 
     refresh_pointers();
+    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
+                                  nullptr, nullptr};
+    input_topology = Topology{num_edges, 0, topology.parent, topology.child};
   }
 
   void refresh_pointers() {
@@ -364,19 +362,8 @@ struct BranchLQRProblem {
         .B = B_ptr.data(),
         .c = c_ptr.data(),
         .delta = delta_ptr.data(),
-        .dimensions =
-            {
-                .state_dim = state_dim,
-                .control_dim = control_dim,
-                .num_stages = num_edges,
-            },
-        .topology =
-            {
-                .context = &topology,
-                .root = BranchTopology::root,
-                .edge_parent = BranchTopology::edge_parent,
-                .edge_child = BranchTopology::edge_child,
-            },
+        .dimensions = input_dimensions,
+        .topology = input_topology,
     };
   }
 };
@@ -450,9 +437,6 @@ TEST(LQRTopology, ReusesCompiledTopologyAcrossFactorAndSolveCalls) {
   auto lqr = LQR(input, workspace);
 
   ASSERT_EQ(lqr.factor_with_status(), LQR::FactorStatus::SUCCESS);
-  const int root_calls = problem.topology.root_calls;
-  const int edge_parent_calls = problem.topology.edge_parent_calls;
-  const int edge_child_calls = problem.topology.edge_child_calls;
 
   ASSERT_EQ(lqr.factor_with_status(), LQR::FactorStatus::SUCCESS);
 
@@ -462,9 +446,6 @@ TEST(LQRTopology, ReusesCompiledTopologyAcrossFactorAndSolveCalls) {
   lqr.solve(output);
   lqr.solve(output);
 
-  EXPECT_EQ(problem.topology.root_calls, root_calls);
-  EXPECT_EQ(problem.topology.edge_parent_calls, edge_parent_calls);
-  EXPECT_EQ(problem.topology.edge_child_calls, edge_child_calls);
 
   workspace.free(problem.num_edges);
 }
@@ -488,6 +469,8 @@ struct VariableDimensionBranchProblem {
   std::vector<int> state_dims = {2, 1, 3};
   std::vector<int> control_dims = {2, 1};
   BranchTopology topology;
+  Dimensions input_dimensions;
+  Topology input_topology;
 
   std::vector<Eigen::MatrixXd> Q;
   std::vector<Eigen::MatrixXd> M;
@@ -510,14 +493,14 @@ struct VariableDimensionBranchProblem {
   std::vector<double *> delta_ptr;
 
   VariableDimensionBranchProblem()
-      : Q(3), M(2), R(2), A(2), B(2), q(3), r(2), c(3), delta(3),
-        Q_ptr(3), M_ptr(2), R_ptr(2), A_ptr(2), B_ptr(2), q_ptr(3), r_ptr(2),
-        c_ptr(3), delta_ptr(3) {
+      : Q(3), M(2), R(2), A(2), B(2), q(3), r(2), c(3), delta(3), Q_ptr(3),
+        M_ptr(2), R_ptr(2), A_ptr(2), B_ptr(2), q_ptr(3), r_ptr(2), c_ptr(3),
+        delta_ptr(3) {
     Q[0] = (Eigen::Matrix2d() << 2.0, 0.1, 0.1, 1.7).finished();
     Q[1] = Eigen::MatrixXd::Constant(1, 1, 1.3);
-    Q[2] = (Eigen::Matrix3d() << 1.8, 0.1, -0.2, 0.1, 1.6, 0.05, -0.2, 0.05,
-            2.1)
-               .finished();
+    Q[2] =
+        (Eigen::Matrix3d() << 1.8, 0.1, -0.2, 0.1, 1.6, 0.05, -0.2, 0.05, 2.1)
+            .finished();
 
     M[0] = (Eigen::Matrix2d() << 0.1, -0.2, 0.05, 0.15).finished();
     M[1] = (Eigen::Matrix<double, 2, 1>() << -0.1, 0.2).finished();
@@ -544,6 +527,9 @@ struct VariableDimensionBranchProblem {
     delta[2] = (Eigen::Vector3d() << 0.7, 1.0, 1.2).finished();
 
     refresh_pointers();
+    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
+                                  nullptr, nullptr};
+    input_topology = Topology{num_edges, 0, topology.parent, topology.child};
   }
 
   void refresh_pointers() {
@@ -574,21 +560,8 @@ struct VariableDimensionBranchProblem {
         .B = B_ptr.data(),
         .c = c_ptr.data(),
         .delta = delta_ptr.data(),
-        .dimensions =
-            {
-                .state_dim = 0,
-                .control_dim = 0,
-                .num_stages = num_edges,
-                .state_dims = state_dims.data(),
-                .control_dims = control_dims.data(),
-            },
-        .topology =
-            {
-                .context = &topology,
-                .root = BranchTopology::root,
-                .edge_parent = BranchTopology::edge_parent,
-                .edge_child = BranchTopology::edge_child,
-            },
+        .dimensions = input_dimensions,
+        .topology = input_topology,
     };
   }
 };
@@ -671,7 +644,7 @@ TEST(LQRSolve, SolvesVariableDimensionBranchingTreeProblem) {
   auto input = problem.input();
 
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
 
   ASSERT_EQ(lqr.factor_with_status(), LQR::FactorStatus::SUCCESS);
@@ -690,15 +663,6 @@ struct FiveNodeTopology {
   std::array<int, 4> parent = {0, 0, 1, 1};
   std::array<int, 4> child = {1, 2, 3, 4};
 
-  static auto root(const void *) -> int { return 0; }
-
-  static auto edge_parent(const void *context, const int edge) -> int {
-    return static_cast<const FiveNodeTopology *>(context)->parent[edge];
-  }
-
-  static auto edge_child(const void *context, const int edge) -> int {
-    return static_cast<const FiveNodeTopology *>(context)->child[edge];
-  }
 };
 
 struct FiveNodeVariableTreeProblem {
@@ -707,6 +671,8 @@ struct FiveNodeVariableTreeProblem {
   std::array<int, num_nodes> state_dims = {3, 1, 2, 4, 2};
   std::array<int, num_edges> control_dims = {2, 1, 3, 1};
   FiveNodeTopology topology;
+  Dimensions input_dimensions;
+  Topology input_topology;
 
   std::vector<Eigen::MatrixXd> Q;
   std::vector<Eigen::MatrixXd> M;
@@ -731,9 +697,9 @@ struct FiveNodeVariableTreeProblem {
   FiveNodeVariableTreeProblem()
       : Q(num_nodes), M(num_edges), R(num_edges), A(num_edges), B(num_edges),
         q(num_nodes), r(num_edges), c(num_nodes), delta(num_nodes),
-        Q_ptr(num_nodes), M_ptr(num_edges), R_ptr(num_edges),
-        A_ptr(num_edges), B_ptr(num_edges), q_ptr(num_nodes),
-        r_ptr(num_edges), c_ptr(num_nodes), delta_ptr(num_nodes) {
+        Q_ptr(num_nodes), M_ptr(num_edges), R_ptr(num_edges), A_ptr(num_edges),
+        B_ptr(num_edges), q_ptr(num_nodes), r_ptr(num_edges), c_ptr(num_nodes),
+        delta_ptr(num_nodes) {
     for (int node = 0; node < num_nodes; ++node) {
       const int n = state_dims[node];
       Q[node] = Eigen::MatrixXd::Identity(n, n) * (1.5 + 0.2 * node);
@@ -745,10 +711,9 @@ struct FiveNodeVariableTreeProblem {
       }
       q[node] = Eigen::VectorXd::LinSpaced(n, -0.15 + 0.03 * node,
                                            0.12 + 0.02 * node);
-      c[node] = Eigen::VectorXd::LinSpaced(n, 0.05 * node,
-                                           0.04 + 0.03 * node);
-      delta[node] = Eigen::VectorXd::LinSpaced(n, 0.7 + 0.05 * node,
-                                               1.0 + 0.04 * node);
+      c[node] = Eigen::VectorXd::LinSpaced(n, 0.05 * node, 0.04 + 0.03 * node);
+      delta[node] =
+          Eigen::VectorXd::LinSpaced(n, 0.7 + 0.05 * node, 1.0 + 0.04 * node);
     }
 
     for (int edge = 0; edge < num_edges; ++edge) {
@@ -769,16 +734,14 @@ struct FiveNodeVariableTreeProblem {
       }
       for (int col = 0; col < n_parent; ++col) {
         for (int row = 0; row < n_child; ++row) {
-          A[edge](row, col) =
-              0.08 * static_cast<double>(row + 1) /
-              static_cast<double>(edge + col + 2);
+          A[edge](row, col) = 0.08 * static_cast<double>(row + 1) /
+                              static_cast<double>(edge + col + 2);
         }
       }
       for (int col = 0; col < m; ++col) {
         for (int row = 0; row < n_child; ++row) {
-          B[edge](row, col) =
-              -0.06 * static_cast<double>(col + 1) /
-              static_cast<double>(edge + row + 2);
+          B[edge](row, col) = -0.06 * static_cast<double>(col + 1) /
+                              static_cast<double>(edge + row + 2);
         }
       }
 
@@ -789,11 +752,15 @@ struct FiveNodeVariableTreeProblem {
           R[edge](col, row) = R[edge](row, col);
         }
       }
-      r[edge] = Eigen::VectorXd::LinSpaced(m, -0.2 + 0.04 * edge,
-                                           0.1 + 0.03 * edge);
+      r[edge] =
+          Eigen::VectorXd::LinSpaced(m, -0.2 + 0.04 * edge, 0.1 + 0.03 * edge);
     }
 
     refresh_pointers();
+    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
+                                  nullptr, nullptr};
+    input_topology = Topology{num_edges, 0, topology.parent.data(),
+                              topology.child.data()};
   }
 
   void refresh_pointers() {
@@ -824,21 +791,8 @@ struct FiveNodeVariableTreeProblem {
         .B = B_ptr.data(),
         .c = c_ptr.data(),
         .delta = delta_ptr.data(),
-        .dimensions =
-            {
-                .state_dim = 0,
-                .control_dim = 0,
-                .num_stages = num_edges,
-                .state_dims = state_dims.data(),
-                .control_dims = control_dims.data(),
-            },
-        .topology =
-            {
-                .context = &topology,
-                .root = FiveNodeTopology::root,
-                .edge_parent = FiveNodeTopology::edge_parent,
-                .edge_child = FiveNodeTopology::edge_child,
-            },
+        .dimensions = input_dimensions,
+        .topology = input_topology,
     };
   }
 };
@@ -980,19 +934,19 @@ TEST(LQRTopology, CompilesMultiChildPreorderAndPostorder) {
   auto problem = FiveNodeVariableTreeProblem();
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
 
   ASSERT_EQ(lqr.factor_with_status(), LQR::FactorStatus::SUCCESS);
 
-  EXPECT_EQ(std::vector<int>(workspace.child_offsets,
-                             workspace.child_offsets + 6),
-            (std::vector<int>{0, 2, 4, 4, 4, 4}));
+  EXPECT_EQ(
+      std::vector<int>(workspace.child_offsets, workspace.child_offsets + 6),
+      (std::vector<int>{0, 2, 4, 4, 4, 4}));
   EXPECT_EQ(std::vector<int>(workspace.child_edges, workspace.child_edges + 4),
             (std::vector<int>{0, 1, 2, 3}));
-  EXPECT_EQ(std::vector<int>(workspace.preorder_nodes,
-                             workspace.preorder_nodes + 5),
-            (std::vector<int>{0, 1, 3, 4, 2}));
+  EXPECT_EQ(
+      std::vector<int>(workspace.preorder_nodes, workspace.preorder_nodes + 5),
+      (std::vector<int>{0, 1, 3, 4, 2}));
   EXPECT_EQ(std::vector<int>(workspace.postorder_nodes,
                              workspace.postorder_nodes + 5),
             (std::vector<int>{2, 4, 3, 1, 0}));
@@ -1006,7 +960,7 @@ TEST(LQRTopology, RejectsDisconnectedTree) {
   problem.topology.child[3] = 3;
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
 
   EXPECT_EQ(lqr.factor_with_status(), LQR::FactorStatus::INVALID_TOPOLOGY);
@@ -1019,7 +973,7 @@ TEST(LQRTopology, RejectsCycle) {
   problem.topology.parent[0] = 4;
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
 
   EXPECT_EQ(lqr.factor_with_status(), LQR::FactorStatus::INVALID_TOPOLOGY);
@@ -1031,7 +985,7 @@ TEST(LQRSolve, MatchesDenseKKTOnVariableDimensionTreeProblem) {
   auto problem = FiveNodeVariableTreeProblem();
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
 
   ASSERT_EQ(lqr.factor_with_status(), LQR::FactorStatus::SUCCESS);

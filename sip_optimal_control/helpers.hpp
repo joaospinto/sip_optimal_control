@@ -28,6 +28,7 @@ private:
   const Input &input_;
   Workspace &workspace_;
   LQR::Input lqr_input_;
+  LQR lqr_solver_;
   bool input_is_valid_;
 };
 

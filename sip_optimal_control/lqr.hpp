@@ -2,6 +2,58 @@
 
 namespace sip::optimal_control {
 
+struct Topology {
+  int num_edges = 0;
+  int root = 0;
+  const int *edge_parents = nullptr;
+  const int *edge_children = nullptr;
+
+  int num_nodes() const;
+
+  void reserve(int num_edges);
+  void free();
+  int mem_assign(int num_edges, unsigned char *mem_ptr);
+  static constexpr int num_bytes(int num_edges) {
+    return 2 * num_edges * sizeof(int);
+  }
+
+  void set_chain();
+  void set_tree(int root, const int *edge_parents, const int *edge_children);
+};
+
+struct Dimensions {
+  int theta_dim = 0;
+  const int *state_dims = nullptr;
+  const int *control_dims = nullptr;
+  const int *c_dims = nullptr;
+  const int *g_dims = nullptr;
+
+  void reserve(int num_edges);
+  void free();
+  int mem_assign(int num_edges, unsigned char *mem_ptr);
+  static constexpr int num_bytes(int num_edges) {
+    return (3 * (num_edges + 1) + num_edges) * sizeof(int);
+  }
+
+  void set_uniform(int num_edges, int state_dim, int control_dim, int c_dim,
+                   int g_dim, int theta_dim = 0);
+
+  int get_schur_dim() const;
+  int get_state_dim(int node) const;
+  int get_control_dim(int edge) const;
+  int get_c_dim(int node) const;
+  int get_g_dim(int node) const;
+  int max_state_dim(int num_nodes) const;
+  int max_control_dim(int num_edges) const;
+  int max_c_dim(int num_nodes) const;
+  int max_g_dim(int num_nodes) const;
+  int get_stagewise_x_dim(int num_edges) const;
+  int get_x_dim(int num_edges) const;
+  int get_y_dim(int num_nodes) const;
+  int get_z_dim(int num_nodes) const;
+  int get_stagewise_kkt_dim(int num_edges) const;
+};
+
 class LQR {
 public:
   enum class FactorStatus {
@@ -13,49 +65,6 @@ public:
   };
 
   struct Input {
-    // Optional rooted-tree topology. When omitted, edges use the chain
-    // topology edge -> (edge, edge + 1). General DAGs should be condensed into
-    // tree pieces plus separator Schur complements before calling this solver.
-    struct Topology {
-      const void *context = nullptr;
-      int (*root)(const void *context) = nullptr;
-      int (*edge_parent)(const void *context, int edge) = nullptr;
-      int (*edge_child)(const void *context, int edge) = nullptr;
-    };
-
-    struct Dimensions {
-      int state_dim;
-      int control_dim;
-      int num_stages;
-      const int *state_dims = nullptr;
-      const int *control_dims = nullptr;
-
-      int num_edges() const { return num_stages; }
-      int num_nodes() const { return num_stages + 1; }
-      int get_state_dim(int node) const {
-        return state_dims == nullptr ? state_dim : state_dims[node];
-      }
-      int get_control_dim(int edge) const {
-        return control_dims == nullptr ? control_dim : control_dims[edge];
-      }
-      int max_state_dim() const {
-        int result = 0;
-        for (int node = 0; node < num_nodes(); ++node) {
-          const int dim = get_state_dim(node);
-          result = result < dim ? dim : result;
-        }
-        return result;
-      }
-      int max_control_dim() const {
-        int result = 0;
-        for (int edge = 0; edge < num_edges(); ++edge) {
-          const int dim = get_control_dim(edge);
-          result = result < dim ? dim : result;
-        }
-        return result;
-      }
-    };
-
     double **Q;
     double **M;
     double **R;
@@ -66,8 +75,8 @@ public:
     double **c;
     double **delta;
 
-    Dimensions dimensions;
-    Topology topology = {};
+    const Dimensions &dimensions;
+    const Topology &topology;
   };
 
   struct Output {
@@ -76,20 +85,20 @@ public:
     double **y;
 
     // To dynamically allocate the required memory.
-    void reserve(int num_stages);
+    void reserve(int num_edges);
     void free();
 
     // For using pre-allocated (possibly statically allocated) memory.
-    auto mem_assign(int num_stages, unsigned char *mem_ptr) -> int;
+    auto mem_assign(int num_edges, unsigned char *mem_ptr) -> int;
 
     // For knowing how much memory to pre-allocate.
-    static constexpr auto num_bytes(int num_stages) -> int {
-      return (3 * num_stages + 2) * sizeof(double *);
+    static constexpr auto num_bytes(int num_edges) -> int {
+      return (3 * num_edges + 2) * sizeof(double *);
     }
   };
 
   struct Workspace {
-    // NOTE: we need to store these for ALL stages.
+    // NOTE: we need to store these for ALL nodes.
     double **W;
     double **K;
     double **V;
@@ -100,7 +109,7 @@ public:
     double **k;
     double **v;
 
-    // NOTE: we only need to store these for one stage at a time.
+    // NOTE: we only need to store these for one edge at a time.
     double *G;
     double *g;
     double *H;
@@ -115,35 +124,21 @@ public:
     int *preorder_nodes;
     int *postorder_nodes;
     int *node_marks;
-    bool topology_is_initialized;
-    FactorStatus topology_status;
-    int topology_state_dim;
-    int topology_control_dim;
-    int topology_num_stages;
-    const int *topology_state_dims;
-    const int *topology_control_dims;
-    const void *topology_context;
-    int (*topology_root)(const void *context);
-    int (*topology_edge_parent)(const void *context, int edge);
-    int (*topology_edge_child)(const void *context, int edge);
-
     // To dynamically allocate the required memory.
-    void reserve(int state_dim, int control_dim, int num_stages);
-    void reserve(const Input::Dimensions &dimensions);
-    void free(int num_stages);
+    void reserve(int state_dim, int control_dim, int num_edges);
+    void reserve(const Dimensions &dimensions, const Topology &topology);
+    void free(int num_edges);
 
     // For using pre-allocated (possibly statically allocated) memory.
-    auto mem_assign(int state_dim, int control_dim, int num_stages,
-                    unsigned char *mem_ptr) -> int;
-    auto mem_assign(const Input::Dimensions &dimensions,
+    auto mem_assign(const Dimensions &dimensions, const Topology &topology,
                     unsigned char *mem_ptr) -> int;
 
     // For knowing how much memory to pre-allocate.
     static constexpr auto num_bytes(int state_dim, int control_dim,
-                                    int num_stages) -> int {
+                                    int num_edges) -> int {
       const int n = state_dim;
       const int m = control_dim;
-      const int T = num_stages;
+      const int T = num_edges;
       const int W_size = T * sizeof(double *) + T * n * n * sizeof(double);
       const int K_size = T * sizeof(double *) + T * m * n * sizeof(double);
       const int V_size =
@@ -173,13 +168,13 @@ public:
       const int postorder_nodes_size = (T + 1) * sizeof(int);
       const int node_marks_size = (T + 1) * sizeof(int);
       return W_size + K_size + V_size + G_factor_size + F_factor_size +
-             sqrt_delta_size + sqrt_delta_inv_size + k_size + v_size +
-             G_size + g_size + H_size + h_size + F_size + f_size +
-             child_offsets_size + child_edges_size + edge_parents_size +
-             edge_children_size + preorder_nodes_size + postorder_nodes_size +
-             node_marks_size;
+             sqrt_delta_size + sqrt_delta_inv_size + k_size + v_size + G_size +
+             g_size + H_size + h_size + F_size + f_size + child_offsets_size +
+             child_edges_size + edge_parents_size + edge_children_size +
+             preorder_nodes_size + postorder_nodes_size + node_marks_size;
     }
-    static auto num_bytes(const Input::Dimensions &dimensions) -> int;
+    static auto num_bytes(const Dimensions &dimensions,
+                          const Topology &topology) -> int;
   };
 
   LQR(const Input &data, Workspace &workspace);
@@ -192,6 +187,7 @@ public:
 private:
   const Input &input_;
   Workspace &workspace_;
+  FactorStatus traversal_status_;
 };
 
 } // namespace sip::optimal_control

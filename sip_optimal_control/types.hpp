@@ -9,129 +9,8 @@
 
 namespace sip::optimal_control {
 
-struct Dimensions {
-  int num_stages;
-  int state_dim;
-  int control_dim;
-  int c_dim;
-  int g_dim;
-  // Number of dense global variables eliminated through the Schur complement.
-  // Non-tree DAG separator variables should be represented in this block.
-  int theta_dim = 0;
-  const int *state_dims = nullptr;
-  const int *control_dims = nullptr;
-  const int *c_dims = nullptr;
-  const int *g_dims = nullptr;
-
-  int num_nodes() const { return num_stages + 1; }
-  int num_edges() const { return num_stages; }
-  int get_schur_dim() const { return theta_dim; }
-  int get_state_dim(const int node) const {
-    return state_dims == nullptr ? state_dim : state_dims[node];
-  }
-  int get_control_dim(const int edge) const {
-    return control_dims == nullptr ? control_dim : control_dims[edge];
-  }
-  int get_c_dim(const int node) const {
-    return c_dims == nullptr ? c_dim : c_dims[node];
-  }
-  int get_g_dim(const int node) const {
-    return g_dims == nullptr ? g_dim : g_dims[node];
-  }
-  int max_state_dim() const {
-    int result = 0;
-    for (int node = 0; node < num_nodes(); ++node) {
-      const int dim = get_state_dim(node);
-      result = result < dim ? dim : result;
-    }
-    return result;
-  }
-  int max_control_dim() const {
-    int result = 0;
-    for (int edge = 0; edge < num_edges(); ++edge) {
-      const int dim = get_control_dim(edge);
-      result = result < dim ? dim : result;
-    }
-    return result;
-  }
-  int max_c_dim() const {
-    int result = 0;
-    for (int node = 0; node < num_nodes(); ++node) {
-      const int dim = get_c_dim(node);
-      result = result < dim ? dim : result;
-    }
-    return result;
-  }
-  int max_g_dim() const {
-    int result = 0;
-    for (int node = 0; node < num_nodes(); ++node) {
-      const int dim = get_g_dim(node);
-      result = result < dim ? dim : result;
-    }
-    return result;
-  }
-
-  int get_stagewise_x_dim() const {
-    int result = get_state_dim(num_stages);
-    for (int edge = 0; edge < num_edges(); ++edge) {
-      result += get_state_dim(edge) + get_control_dim(edge);
-    }
-    return result;
-  }
-
-  int get_x_dim() const { return get_stagewise_x_dim() + theta_dim; }
-
-  int get_y_dim() const {
-    int result = 0;
-    for (int node = 0; node < num_nodes(); ++node) {
-      result += get_state_dim(node) + get_c_dim(node);
-    }
-    return result;
-  }
-
-  int get_z_dim() const {
-    int result = 0;
-    for (int node = 0; node < num_nodes(); ++node) {
-      result += get_g_dim(node);
-    }
-    return result;
-  }
-
-  int get_stagewise_kkt_dim() const {
-    return get_stagewise_x_dim() + get_y_dim() + get_z_dim();
-  }
-
-  int get_x_state_offset(const int node) const {
-    int offset = 0;
-    for (int edge = 0; edge < node; ++edge) {
-      offset += get_state_dim(edge) + get_control_dim(edge);
-    }
-    return offset;
-  }
-  int get_x_control_offset(const int edge) const {
-    return get_x_state_offset(edge) + get_state_dim(edge);
-  }
-  int get_y_dyn_offset(const int node) const {
-    int offset = 0;
-    for (int i = 0; i < node; ++i) {
-      offset += get_state_dim(i) + get_c_dim(i);
-    }
-    return offset;
-  }
-  int get_y_c_offset(const int node) const {
-    return get_y_dyn_offset(node) + get_state_dim(node);
-  }
-  int get_z_offset(const int node) const {
-    int offset = 0;
-    for (int i = 0; i < node; ++i) {
-      offset += get_g_dim(i);
-    }
-    return offset;
-  }
-};
-
 struct ModelCallbackInput {
-  // Dense global/separator variables shared by all stages.
+  // Dense global/separator variables shared by all nodes.
   double *theta;
   // The states.
   double **states;
@@ -145,15 +24,15 @@ struct ModelCallbackInput {
   double **inequality_constraint_multipliers;
 
   // To dynamically allocate the required memory.
-  void reserve(int num_stages);
+  void reserve(int num_edges);
   void free();
 
   // For using pre-allocated (possibly statically allocated) memory.
-  auto mem_assign(int num_stages, unsigned char *mem_ptr) -> int;
+  auto mem_assign(int num_edges, unsigned char *mem_ptr) -> int;
 
   // For knowing how much memory to pre-allocate.
-  static constexpr auto num_bytes(int num_stages) -> int {
-    return (5 * num_stages + 4) * sizeof(double *);
+  static constexpr auto num_bytes(int num_edges) -> int {
+    return (5 * num_edges + 4) * sizeof(double *);
   }
 };
 
@@ -216,23 +95,20 @@ struct ModelCallbackOutput {
   // not certify the desired Newton-KKT inertia.
 
   // To dynamically allocate the required memory.
-  void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
-               int g_dim, int theta_dim = 0);
-  void reserve(const Dimensions &dimensions);
-  void free(int num_stages);
+  void reserve(const Dimensions &dimensions, int num_edges);
+  void free(int num_edges);
 
   // For using pre-allocated (possibly statically allocated) memory.
-  auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
-                  int g_dim, unsigned char *mem_ptr, int theta_dim = 0) -> int;
-  auto mem_assign(const Dimensions &dimensions, unsigned char *mem_ptr) -> int;
+  auto mem_assign(const Dimensions &dimensions, int num_edges,
+                  unsigned char *mem_ptr) -> int;
 
   // For knowing how much memory to pre-allocate.
-  static constexpr auto num_bytes(int state_dim, int control_dim,
-                                  int num_stages, int c_dim, int g_dim,
-                                  int theta_dim = 0) -> int {
+  static constexpr auto num_bytes(int state_dim, int control_dim, int num_edges,
+                                  int c_dim, int g_dim, int theta_dim = 0)
+      -> int {
     const int n = state_dim;
     const int m = control_dim;
-    const int T = num_stages;
+    const int T = num_edges;
     const int p = theta_dim;
 
     const int df_dx_size =
@@ -282,25 +158,18 @@ struct ModelCallbackOutput {
            d2L_du2_size + d2L_dxdtheta_size + d2L_dudtheta_size +
            d2L_dtheta2_size;
   }
-  static auto num_bytes(const Dimensions &dimensions) -> int;
+  static auto num_bytes(const Dimensions &dimensions, int num_edges) -> int;
 };
 
 struct Input {
-  using Dimensions = ::sip::optimal_control::Dimensions;
-  using Topology = LQR::Input::Topology;
   using ModelCallback = std::function<void(const ModelCallbackInput &)>;
 
+  Dimensions dimensions;
+  Topology topology;
   // Callback for filling the ModelCallbackOutput object.
   ModelCallback model_callback;
   // Callback for (optionally) declaring a timeout. Return true for timeout.
   ::sip::Input::TimeoutCallback timeout_callback;
-  // The problem dimensions.
-  Dimensions dimensions;
-  // Optional rooted-tree topology for direct Riccati elimination. When omitted,
-  // edges use the chain topology edge -> (edge, edge + 1). Non-tree DAG
-  // linkages should be condensed into theta and handled through the dense
-  // Schur complement blocks above.
-  Topology topology = {};
 };
 
 enum class InputValidationStatus {
@@ -309,7 +178,8 @@ enum class InputValidationStatus {
   INVALID_TOPOLOGY = 2,
 };
 
-auto validate_input(const Input &input) -> InputValidationStatus;
+auto validate_input(const Dimensions &dimensions, const Topology &topology)
+    -> InputValidationStatus;
 
 struct Workspace {
   struct RegularizedLQRData {
@@ -332,23 +202,18 @@ struct Workspace {
     double *stagewise_scratch;
 
     // To dynamically allocate the required memory.
-    void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
-                 int g_dim, int theta_dim = 0);
-    void reserve(const Dimensions &dimensions);
-    void free(int num_stages);
+    void reserve(const Dimensions &dimensions, int num_edges);
+    void free(int num_edges);
 
     // For using pre-allocated (possibly statically allocated) memory.
-    auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
-                    int g_dim, unsigned char *mem_ptr, int theta_dim = 0)
-        -> int;
-    auto mem_assign(const Dimensions &dimensions, unsigned char *mem_ptr) -> int;
+    auto mem_assign(const Dimensions &dimensions, int num_edges,
+                    unsigned char *mem_ptr) -> int;
 
     // For knowing how much memory to pre-allocate.
     static constexpr auto num_bytes(int state_dim, int control_dim,
-                                    int num_stages, int c_dim, int g_dim,
-                                    int theta_dim = 0)
-        -> int {
-      const int T = num_stages;
+                                    int num_edges, int c_dim, int g_dim,
+                                    int theta_dim = 0) -> int {
+      const int T = num_edges;
       const int n = state_dim;
       const int m = control_dim;
       const int p = theta_dim;
@@ -373,11 +238,10 @@ struct Workspace {
           (T + 1) * sizeof(double *) + (T + 1) * n * sizeof(double);
       const int c_r2_inv_size =
           (T + 1) * sizeof(double *) + (T + 1) * c_dim * sizeof(double);
-      const int theta_data_size =
-          p > 0 ? (2 * stagewise_kkt_dim * p + 2 * p * p + p +
-                   stagewise_kkt_dim) *
-                      static_cast<int>(sizeof(double))
-                : 0;
+      const int theta_data_size = p > 0 ? (2 * stagewise_kkt_dim * p +
+                                           2 * p * p + p + stagewise_kkt_dim) *
+                                              static_cast<int>(sizeof(double))
+                                        : 0;
       const int stagewise_scratch_size =
           2 * n * num_rhs * static_cast<int>(sizeof(double));
 
@@ -385,54 +249,52 @@ struct Workspace {
              q_mod_size + r_mod_size + c_mod_size + dyn_r2_size +
              c_r2_inv_size + theta_data_size + stagewise_scratch_size;
     }
-    static auto num_bytes(const Dimensions &dimensions) -> int;
+    static auto num_bytes(const Dimensions &dimensions, int num_edges) -> int;
   };
 
   // To dynamically allocate the required memory.
-  void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
-               int g_dim, int theta_dim = 0);
-  void reserve(const Dimensions &dimensions);
-  void free(int num_stages);
+  void reserve(const Dimensions &dimensions, const Topology &topology);
+  void free(const Topology &topology);
 
   // For using pre-allocated (possibly statically allocated) memory.
-  auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
-                  int g_dim, unsigned char *mem_ptr, int theta_dim = 0) -> int;
-  auto mem_assign(const Dimensions &dimensions, unsigned char *mem_ptr) -> int;
+  auto mem_assign(const Dimensions &dimensions, const Topology &topology,
+                  unsigned char *mem_ptr) -> int;
 
   // For knowing how much memory to pre-allocate.
-  static constexpr auto num_bytes(int state_dim, int control_dim,
-                                  int num_stages, int c_dim, int g_dim,
-                                  int theta_dim = 0) -> int {
+  static constexpr auto num_bytes(int state_dim, int control_dim, int num_edges,
+                                  int c_dim, int g_dim, int theta_dim = 0)
+      -> int {
     const int x_dim =
-        num_stages * (state_dim + control_dim) + state_dim + theta_dim;
-    const int y_dim = (c_dim + state_dim) * (num_stages + 1);
-    const int z_dim = g_dim * (num_stages + 1);
-    const int metadata_size = (9 * num_stages + 7) * sizeof(int);
-    int total = ModelCallbackOutput::num_bytes(state_dim, control_dim,
-                                               num_stages, c_dim, g_dim,
-                                               theta_dim) +
-                ModelCallbackInput::num_bytes(num_stages) +
-                (x_dim + y_dim + z_dim) * sizeof(double) + metadata_size;
-    total = ((total + alignof(std::max_align_t) - 1) /
-             alignof(std::max_align_t)) *
-            alignof(std::max_align_t);
-    total += LQR::Workspace::num_bytes(state_dim, control_dim, num_stages);
-    total = ((total + alignof(std::max_align_t) - 1) /
-             alignof(std::max_align_t)) *
-            alignof(std::max_align_t);
-    total += LQR::Output::num_bytes(num_stages);
-    total = ((total + alignof(std::max_align_t) - 1) /
-             alignof(std::max_align_t)) *
-            alignof(std::max_align_t);
-    total += RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
+        num_edges * (state_dim + control_dim) + state_dim + theta_dim;
+    const int y_dim = (c_dim + state_dim) * (num_edges + 1);
+    const int z_dim = g_dim * (num_edges + 1);
+    const int metadata_size = (5 * num_edges + 4) * sizeof(int);
+    int total =
+        ModelCallbackOutput::num_bytes(state_dim, control_dim, num_edges, c_dim,
+                                       g_dim, theta_dim) +
+        ModelCallbackInput::num_bytes(num_edges) +
+        (x_dim + y_dim + z_dim) * sizeof(double) + metadata_size;
+    total =
+        ((total + alignof(std::max_align_t) - 1) / alignof(std::max_align_t)) *
+        alignof(std::max_align_t);
+    total += LQR::Workspace::num_bytes(state_dim, control_dim, num_edges);
+    total =
+        ((total + alignof(std::max_align_t) - 1) / alignof(std::max_align_t)) *
+        alignof(std::max_align_t);
+    total += LQR::Output::num_bytes(num_edges);
+    total =
+        ((total + alignof(std::max_align_t) - 1) / alignof(std::max_align_t)) *
+        alignof(std::max_align_t);
+    total += RegularizedLQRData::num_bytes(state_dim, control_dim, num_edges,
                                            c_dim, g_dim, theta_dim);
-    total = ((total + alignof(std::max_align_t) - 1) /
-             alignof(std::max_align_t)) *
-            alignof(std::max_align_t);
+    total =
+        ((total + alignof(std::max_align_t) - 1) / alignof(std::max_align_t)) *
+        alignof(std::max_align_t);
     total += sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
     return total;
   }
-  static auto num_bytes(const Dimensions &dimensions) -> int;
+  static auto num_bytes(const Dimensions &dimensions, const Topology &topology)
+      -> int;
 
   ModelCallbackOutput model_callback_output;
 
@@ -446,10 +308,6 @@ struct Workspace {
   int y_dim;
   int z_dim;
   int stagewise_kkt_dim;
-  int *state_dims;
-  int *control_dims;
-  int *c_dims;
-  int *g_dims;
   int *x_state_offsets;
   int *x_control_offsets;
   int *y_dyn_offsets;

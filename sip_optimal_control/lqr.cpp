@@ -9,10 +9,143 @@
 
 namespace sip::optimal_control {
 
-void LQR::Output::reserve(int num_stages) {
-  x = new double *[num_stages + 1];
-  u = new double *[num_stages];
-  y = new double *[num_stages + 1];
+int Topology::num_nodes() const { return num_edges + 1; }
+
+void Topology::reserve(const int edge_count) {
+  num_edges = edge_count;
+  edge_parents = new int[edge_count];
+  edge_children = new int[edge_count];
+}
+
+void Topology::free() {
+  delete[] edge_parents;
+  delete[] edge_children;
+}
+
+int Topology::mem_assign(const int edge_count, unsigned char *mem_ptr) {
+  num_edges = edge_count;
+  edge_parents = reinterpret_cast<int *>(mem_ptr);
+  edge_children = reinterpret_cast<int *>(mem_ptr + edge_count * sizeof(int));
+  return num_bytes(edge_count);
+}
+
+void Topology::set_chain() {
+  root = 0;
+  auto *parents = const_cast<int *>(edge_parents);
+  auto *children = const_cast<int *>(edge_children);
+  for (int edge = 0; edge < num_edges; ++edge) {
+    parents[edge] = edge;
+    children[edge] = edge + 1;
+  }
+}
+
+void Topology::set_tree(const int root_node, const int *parents,
+                        const int *children) {
+  root = root_node;
+  std::copy_n(parents, num_edges, const_cast<int *>(edge_parents));
+  std::copy_n(children, num_edges, const_cast<int *>(edge_children));
+}
+
+void Dimensions::reserve(const int num_edges) {
+  state_dims = new int[num_edges + 1];
+  control_dims = new int[num_edges];
+  c_dims = new int[num_edges + 1];
+  g_dims = new int[num_edges + 1];
+}
+
+void Dimensions::free() {
+  delete[] state_dims;
+  delete[] control_dims;
+  delete[] c_dims;
+  delete[] g_dims;
+}
+
+int Dimensions::mem_assign(const int num_edges, unsigned char *mem_ptr) {
+  state_dims = reinterpret_cast<int *>(mem_ptr);
+  control_dims = state_dims + num_edges + 1;
+  c_dims = control_dims + num_edges;
+  g_dims = c_dims + num_edges + 1;
+  return num_bytes(num_edges);
+}
+
+void Dimensions::set_uniform(const int num_edges, const int state_dim,
+                             const int control_dim, const int c_dim,
+                             const int g_dim, const int global_dim) {
+  theta_dim = global_dim;
+  std::fill_n(const_cast<int *>(state_dims), num_edges + 1, state_dim);
+  std::fill_n(const_cast<int *>(control_dims), num_edges, control_dim);
+  std::fill_n(const_cast<int *>(c_dims), num_edges + 1, c_dim);
+  std::fill_n(const_cast<int *>(g_dims), num_edges + 1, g_dim);
+}
+
+int Dimensions::get_schur_dim() const { return theta_dim; }
+
+int Dimensions::get_state_dim(const int node) const { return state_dims[node]; }
+
+int Dimensions::get_control_dim(const int edge) const {
+  return control_dims[edge];
+}
+
+int Dimensions::get_c_dim(const int node) const { return c_dims[node]; }
+
+int Dimensions::get_g_dim(const int node) const { return g_dims[node]; }
+
+namespace {
+int maximum(const int *values, const int count) {
+  return count == 0 ? 0 : *std::max_element(values, values + count);
+}
+} // namespace
+
+int Dimensions::max_state_dim(const int num_nodes) const {
+  return maximum(state_dims, num_nodes);
+}
+
+int Dimensions::max_control_dim(const int num_edges) const {
+  return maximum(control_dims, num_edges);
+}
+
+int Dimensions::max_c_dim(const int num_nodes) const {
+  return maximum(c_dims, num_nodes);
+}
+
+int Dimensions::max_g_dim(const int num_nodes) const {
+  return maximum(g_dims, num_nodes);
+}
+
+int Dimensions::get_stagewise_x_dim(const int num_edges) const {
+  int result = state_dims[num_edges];
+  for (int edge = 0; edge < num_edges; ++edge)
+    result += state_dims[edge] + control_dims[edge];
+  return result;
+}
+
+int Dimensions::get_x_dim(const int num_edges) const {
+  return get_stagewise_x_dim(num_edges) + theta_dim;
+}
+
+int Dimensions::get_y_dim(const int num_nodes) const {
+  int result = 0;
+  for (int node = 0; node < num_nodes; ++node)
+    result += state_dims[node] + c_dims[node];
+  return result;
+}
+
+int Dimensions::get_z_dim(const int num_nodes) const {
+  int result = 0;
+  for (int node = 0; node < num_nodes; ++node)
+    result += g_dims[node];
+  return result;
+}
+
+int Dimensions::get_stagewise_kkt_dim(const int num_edges) const {
+  return get_stagewise_x_dim(num_edges) + get_y_dim(num_edges + 1) +
+         get_z_dim(num_edges + 1);
+}
+
+void LQR::Output::reserve(int num_edges) {
+  x = new double *[num_edges + 1];
+  u = new double *[num_edges];
+  y = new double *[num_edges + 1];
 }
 
 void LQR::Output::free() {
@@ -21,49 +154,53 @@ void LQR::Output::free() {
   delete[] y;
 }
 
-auto LQR::Output::mem_assign(int num_stages, unsigned char *mem_ptr) -> int {
+auto LQR::Output::mem_assign(int num_edges, unsigned char *mem_ptr) -> int {
   int cum_size = 0;
 
   x = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += (num_stages + 1) * sizeof(double *);
+  cum_size += (num_edges + 1) * sizeof(double *);
 
   u = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(double *);
+  cum_size += num_edges * sizeof(double *);
 
   y = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += (num_stages + 1) * sizeof(double *);
+  cum_size += (num_edges + 1) * sizeof(double *);
 
-  assert(cum_size == LQR::Output::num_bytes(num_stages));
+  assert(cum_size == LQR::Output::num_bytes(num_edges));
 
   return cum_size;
 }
 
-void LQR::Workspace::reserve(int state_dim, int control_dim, int num_stages) {
-  const Input::Dimensions dimensions = {
-      .state_dim = state_dim,
-      .control_dim = control_dim,
-      .num_stages = num_stages,
-  };
-  reserve(dimensions);
+void LQR::Workspace::reserve(int state_dim, int control_dim, int num_edges) {
+  Dimensions dimensions;
+  dimensions.reserve(num_edges);
+  dimensions.set_uniform(num_edges, state_dim, control_dim, 0, 0);
+  Topology topology;
+  topology.reserve(num_edges);
+  topology.set_chain();
+  reserve(dimensions, topology);
+  topology.free();
+  dimensions.free();
 }
 
-void LQR::Workspace::reserve(const Input::Dimensions &dimensions) {
-  const int num_stages = dimensions.num_edges();
-  const int num_nodes = dimensions.num_nodes();
-  const int max_state_dim = dimensions.max_state_dim();
-  const int max_control_dim = dimensions.max_control_dim();
+void LQR::Workspace::reserve(const Dimensions &dimensions,
+                             const Topology &input_topology) {
+  const int num_edges = input_topology.num_edges;
+  const int num_nodes = input_topology.num_nodes();
+  const int max_state_dim = dimensions.max_state_dim(num_nodes);
+  const int max_control_dim = dimensions.max_control_dim(num_edges);
 
-  W = new double *[num_stages];
-  K = new double *[num_stages];
+  W = new double *[num_edges];
+  K = new double *[num_edges];
   V = new double *[num_nodes];
-  G_factor = new double *[num_stages];
+  G_factor = new double *[num_edges];
   F_factor = new double *[num_nodes];
   sqrt_delta = new double *[num_nodes];
   sqrt_delta_inv = new double *[num_nodes];
-  k = new double *[num_stages];
+  k = new double *[num_edges];
   v = new double *[num_nodes];
 
-  for (int i = 0; i < num_stages; ++i) {
+  for (int i = 0; i < num_edges; ++i) {
     const int control_dim = dimensions.get_control_dim(i);
 
     W[i] = new double[max_state_dim * max_state_dim];
@@ -89,27 +226,16 @@ void LQR::Workspace::reserve(const Input::Dimensions &dimensions) {
   f = new double[max_state_dim];
 
   child_offsets = new int[num_nodes + 1];
-  child_edges = new int[num_stages];
-  edge_parents = new int[num_stages];
-  edge_children = new int[num_stages];
+  child_edges = new int[num_edges];
+  edge_parents = new int[num_edges];
+  edge_children = new int[num_edges];
   preorder_nodes = new int[num_nodes];
   postorder_nodes = new int[num_nodes];
   node_marks = new int[num_nodes];
-  topology_is_initialized = false;
-  topology_status = FactorStatus::SUCCESS;
-  topology_state_dim = 0;
-  topology_control_dim = 0;
-  topology_num_stages = 0;
-  topology_state_dims = nullptr;
-  topology_control_dims = nullptr;
-  topology_context = nullptr;
-  topology_root = nullptr;
-  topology_edge_parent = nullptr;
-  topology_edge_child = nullptr;
 }
 
-void LQR::Workspace::free(int num_stages) {
-  (void)num_stages;
+void LQR::Workspace::free(int num_edges) {
+  (void)num_edges;
 
   delete[] child_offsets;
   delete[] child_edges;
@@ -126,7 +252,7 @@ void LQR::Workspace::free(int num_stages) {
   delete[] F;
   delete[] f;
 
-  for (int i = 0; i < num_stages; ++i) {
+  for (int i = 0; i < num_edges; ++i) {
     delete[] W[i];
     delete[] K[i];
     delete[] V[i];
@@ -138,11 +264,11 @@ void LQR::Workspace::free(int num_stages) {
     delete[] v[i];
   }
 
-  delete[] V[num_stages];
-  delete[] v[num_stages];
-  delete[] F_factor[num_stages];
-  delete[] sqrt_delta[num_stages];
-  delete[] sqrt_delta_inv[num_stages];
+  delete[] V[num_edges];
+  delete[] v[num_edges];
+  delete[] F_factor[num_edges];
+  delete[] sqrt_delta[num_edges];
+  delete[] sqrt_delta_inv[num_edges];
 
   delete[] W;
   delete[] K;
@@ -155,36 +281,27 @@ void LQR::Workspace::free(int num_stages) {
   delete[] v;
 }
 
-auto LQR::Workspace::mem_assign(int state_dim, int control_dim, int num_stages,
+auto LQR::Workspace::mem_assign(const Dimensions &dimensions,
+                                const Topology &input_topology,
                                 unsigned char *mem_ptr) -> int {
-  const Input::Dimensions dimensions = {
-      .state_dim = state_dim,
-      .control_dim = control_dim,
-      .num_stages = num_stages,
-  };
-  return mem_assign(dimensions, mem_ptr);
-}
-
-auto LQR::Workspace::mem_assign(const Input::Dimensions &dimensions,
-                                unsigned char *mem_ptr) -> int {
-  const int num_stages = dimensions.num_edges();
-  const int num_nodes = dimensions.num_nodes();
-  const int max_state_dim = dimensions.max_state_dim();
-  const int max_control_dim = dimensions.max_control_dim();
+  const int num_edges = input_topology.num_edges;
+  const int num_nodes = input_topology.num_nodes();
+  const int max_state_dim = dimensions.max_state_dim(num_nodes);
+  const int max_control_dim = dimensions.max_control_dim(num_edges);
 
   int cum_size = 0;
 
   W = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(double *);
+  cum_size += num_edges * sizeof(double *);
 
   K = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(double *);
+  cum_size += num_edges * sizeof(double *);
 
   V = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += (num_stages + 1) * sizeof(double *);
+  cum_size += (num_edges + 1) * sizeof(double *);
 
   G_factor = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(double *);
+  cum_size += num_edges * sizeof(double *);
 
   F_factor = reinterpret_cast<double **>(mem_ptr + cum_size);
   cum_size += num_nodes * sizeof(double *);
@@ -196,12 +313,12 @@ auto LQR::Workspace::mem_assign(const Input::Dimensions &dimensions,
   cum_size += num_nodes * sizeof(double *);
 
   k = reinterpret_cast<double **>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(double *);
+  cum_size += num_edges * sizeof(double *);
 
   v = reinterpret_cast<double **>(mem_ptr + cum_size);
   cum_size += num_nodes * sizeof(double *);
 
-  for (int i = 0; i < num_stages; ++i) {
+  for (int i = 0; i < num_edges; ++i) {
     const int control_dim = dimensions.get_control_dim(i);
 
     W[i] = reinterpret_cast<double *>(mem_ptr + cum_size);
@@ -258,13 +375,13 @@ auto LQR::Workspace::mem_assign(const Input::Dimensions &dimensions,
   cum_size += (num_nodes + 1) * sizeof(int);
 
   child_edges = reinterpret_cast<int *>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(int);
+  cum_size += num_edges * sizeof(int);
 
   edge_parents = reinterpret_cast<int *>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(int);
+  cum_size += num_edges * sizeof(int);
 
   edge_children = reinterpret_cast<int *>(mem_ptr + cum_size);
-  cum_size += num_stages * sizeof(int);
+  cum_size += num_edges * sizeof(int);
 
   preorder_nodes = reinterpret_cast<int *>(mem_ptr + cum_size);
   cum_size += num_nodes * sizeof(int);
@@ -274,28 +391,17 @@ auto LQR::Workspace::mem_assign(const Input::Dimensions &dimensions,
 
   node_marks = reinterpret_cast<int *>(mem_ptr + cum_size);
   cum_size += num_nodes * sizeof(int);
-  topology_is_initialized = false;
-  topology_status = FactorStatus::SUCCESS;
-  topology_state_dim = 0;
-  topology_control_dim = 0;
-  topology_num_stages = 0;
-  topology_state_dims = nullptr;
-  topology_control_dims = nullptr;
-  topology_context = nullptr;
-  topology_root = nullptr;
-  topology_edge_parent = nullptr;
-  topology_edge_child = nullptr;
-
-  assert(cum_size == LQR::Workspace::num_bytes(dimensions));
+  assert(cum_size == LQR::Workspace::num_bytes(dimensions, input_topology));
 
   return cum_size;
 }
 
-auto LQR::Workspace::num_bytes(const Input::Dimensions &dimensions) -> int {
-  const int num_edges = dimensions.num_edges();
-  const int num_nodes = dimensions.num_nodes();
-  const int max_state_dim = dimensions.max_state_dim();
-  const int max_control_dim = dimensions.max_control_dim();
+auto LQR::Workspace::num_bytes(const Dimensions &dimensions,
+                               const Topology &topology) -> int {
+  const int num_edges = topology.num_edges;
+  const int num_nodes = topology.num_nodes();
+  const int max_state_dim = dimensions.max_state_dim(num_nodes);
+  const int max_control_dim = dimensions.max_control_dim(num_edges);
 
   int edge_data_size = 0;
   for (int edge = 0; edge < num_edges; ++edge) {
@@ -309,9 +415,8 @@ auto LQR::Workspace::num_bytes(const Input::Dimensions &dimensions) -> int {
   int node_data_size = 0;
   for (int node = 0; node < num_nodes; ++node) {
     const int state_dim = dimensions.get_state_dim(node);
-    node_data_size +=
-        (2 * state_dim * state_dim + 3 * state_dim) *
-        static_cast<int>(sizeof(double));
+    node_data_size += (2 * state_dim * state_dim + 3 * state_dim) *
+                      static_cast<int>(sizeof(double));
   }
 
   const int pointer_size =
@@ -321,9 +426,8 @@ auto LQR::Workspace::num_bytes(const Input::Dimensions &dimensions) -> int {
        max_control_dim * max_state_dim + max_control_dim +
        max_state_dim * max_state_dim) *
       static_cast<int>(sizeof(double));
-  const int topology_size =
-      (num_nodes + 1 + 3 * num_edges + 3 * num_nodes) *
-      static_cast<int>(sizeof(int));
+  const int topology_size = (num_nodes + 1 + 3 * num_edges + 3 * num_nodes) *
+                            static_cast<int>(sizeof(int));
 
   return pointer_size + edge_data_size + node_data_size + scratch_size +
          topology_size;
@@ -408,58 +512,25 @@ void F_inv_mult_vector(const double *F_factor_data,
 }
 
 auto topology_root(const LQR::Input &input) -> int {
-  if (input.topology.root == nullptr) {
-    return 0;
-  }
-  return input.topology.root(input.topology.context);
+  return input.topology.root;
 }
 
 auto topology_edge_parent(const LQR::Input &input, const int edge) -> int {
-  if (input.topology.edge_parent == nullptr) {
-    return edge;
-  }
-  return input.topology.edge_parent(input.topology.context, edge);
+  return input.topology.edge_parents[edge];
 }
 
 auto topology_edge_child(const LQR::Input &input, const int edge) -> int {
-  if (input.topology.edge_child == nullptr) {
-    return edge + 1;
-  }
-  return input.topology.edge_child(input.topology.context, edge);
-}
-
-auto topology_cache_matches(const LQR::Input &input,
-                            const LQR::Workspace &workspace) -> bool {
-  return workspace.topology_is_initialized &&
-         workspace.topology_state_dim == input.dimensions.state_dim &&
-         workspace.topology_control_dim == input.dimensions.control_dim &&
-         workspace.topology_num_stages == input.dimensions.num_stages &&
-         workspace.topology_state_dims == input.dimensions.state_dims &&
-         workspace.topology_control_dims == input.dimensions.control_dims &&
-         workspace.topology_context == input.topology.context &&
-         workspace.topology_root == input.topology.root &&
-         workspace.topology_edge_parent == input.topology.edge_parent &&
-         workspace.topology_edge_child == input.topology.edge_child;
-}
-
-void record_topology_cache_signature(const LQR::Input &input,
-                                     LQR::Workspace &workspace) {
-  workspace.topology_is_initialized = true;
-  workspace.topology_state_dim = input.dimensions.state_dim;
-  workspace.topology_control_dim = input.dimensions.control_dim;
-  workspace.topology_num_stages = input.dimensions.num_stages;
-  workspace.topology_state_dims = input.dimensions.state_dims;
-  workspace.topology_control_dims = input.dimensions.control_dims;
-  workspace.topology_context = input.topology.context;
-  workspace.topology_root = input.topology.root;
-  workspace.topology_edge_parent = input.topology.edge_parent;
-  workspace.topology_edge_child = input.topology.edge_child;
+  return input.topology.edge_children[edge];
 }
 
 auto compile_topology_data(const LQR::Input &input, LQR::Workspace &workspace)
     -> LQR::FactorStatus {
-  const int num_edges = input.dimensions.num_edges();
-  const int num_nodes = input.dimensions.num_nodes();
+  const int num_edges = input.topology.num_edges;
+  const int num_nodes = input.topology.num_nodes();
+  if (input.topology.edge_parents == nullptr ||
+      input.topology.edge_children == nullptr) {
+    return LQR::FactorStatus::INVALID_TOPOLOGY;
+  }
   const int root = topology_root(input);
   if (root < 0 || root >= num_nodes) {
     return LQR::FactorStatus::INVALID_TOPOLOGY;
@@ -482,8 +553,7 @@ auto compile_topology_data(const LQR::Input &input, LQR::Workspace &workspace)
     workspace.child_offsets[node + 1] += workspace.child_offsets[node];
   }
 
-  std::copy_n(workspace.child_offsets, num_nodes,
-              workspace.postorder_nodes);
+  std::copy_n(workspace.child_offsets, num_nodes, workspace.postorder_nodes);
   for (int edge = 0; edge < num_edges; ++edge) {
     const int parent = workspace.edge_parents[edge];
     const int offset = workspace.postorder_nodes[parent]++;
@@ -527,25 +597,19 @@ auto compile_topology_data(const LQR::Input &input, LQR::Workspace &workspace)
 
 LQR::LQR(const LQR::Input &input, LQR::Workspace &workspace)
     : input_(input), workspace_(workspace) {
-  if (!topology_cache_matches(input_, workspace_)) {
-    compile_topology();
-  }
+  compile_topology();
 }
 
 auto LQR::compile_topology() -> FactorStatus {
-  workspace_.topology_status = compile_topology_data(input_, workspace_);
-  record_topology_cache_signature(input_, workspace_);
-  return workspace_.topology_status;
+  traversal_status_ = compile_topology_data(input_, workspace_);
+  return traversal_status_;
 }
 
 auto LQR::factor_with_status() -> FactorStatus {
-  if (!topology_cache_matches(input_, workspace_)) {
-    compile_topology();
+  if (traversal_status_ != FactorStatus::SUCCESS) {
+    return traversal_status_;
   }
-  if (workspace_.topology_status != FactorStatus::SUCCESS) {
-    return workspace_.topology_status;
-  }
-  const int num_nodes = input_.dimensions.num_nodes();
+  const int num_nodes = input_.topology.num_nodes();
 
   for (int order = 0; order < num_nodes; ++order) {
     const int node = workspace_.postorder_nodes[order];
@@ -563,30 +627,25 @@ auto LQR::factor_with_status() -> FactorStatus {
       const int child_dim = input_.dimensions.get_state_dim(child);
       const int control_dim = input_.dimensions.get_control_dim(edge);
 
-      const auto A_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.A[edge], child_dim,
-                                            node_dim);
-      const auto B_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.B[edge], child_dim,
-                                            control_dim);
-      const auto M_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.M[edge], node_dim,
-                                            control_dim);
-      const auto R_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.R[edge], control_dim,
-                                            control_dim);
+      const auto A_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.A[edge], child_dim, node_dim);
+      const auto B_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.B[edge], child_dim, control_dim);
+      const auto M_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.M[edge], node_dim, control_dim);
+      const auto R_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.R[edge], control_dim, control_dim);
 
       auto W_edge =
-          Eigen::Map<Eigen::MatrixXd>(workspace_.W[edge], child_dim,
-                                      child_dim);
+          Eigen::Map<Eigen::MatrixXd>(workspace_.W[edge], child_dim, child_dim);
       auto G_edge_factor = Eigen::Map<Eigen::MatrixXd>(
           workspace_.G_factor[edge], control_dim, control_dim);
       auto H_child =
           Eigen::Map<Eigen::MatrixXd>(workspace_.H, control_dim, child_dim);
       auto H_parent =
           Eigen::Map<Eigen::MatrixXd>(workspace_.H, control_dim, node_dim);
-      auto K_edge = Eigen::Map<Eigen::MatrixXd>(workspace_.K[edge],
-                                                control_dim, node_dim);
+      auto K_edge = Eigen::Map<Eigen::MatrixXd>(workspace_.K[edge], control_dim,
+                                                node_dim);
       auto F_child_parent =
           Eigen::Map<Eigen::MatrixXd>(workspace_.F, child_dim, node_dim);
 
@@ -623,10 +682,9 @@ auto LQR::factor_with_status() -> FactorStatus {
       V_node += F_parent;
     }
 
-    const auto factor_status =
-        factor_F(input_.delta[node], V_node, workspace_.F_factor[node],
-                 workspace_.sqrt_delta[node],
-                 workspace_.sqrt_delta_inv[node], node_dim);
+    const auto factor_status = factor_F(
+        input_.delta[node], V_node, workspace_.F_factor[node],
+        workspace_.sqrt_delta[node], workspace_.sqrt_delta_inv[node], node_dim);
     if (factor_status != FactorStatus::SUCCESS) {
       return factor_status;
     }
@@ -638,7 +696,7 @@ auto LQR::factor_with_status() -> FactorStatus {
 bool LQR::factor() { return factor_with_status() == FactorStatus::SUCCESS; }
 
 void LQR::solve(Output &output) {
-  const int num_nodes = input_.dimensions.num_nodes();
+  const int num_nodes = input_.topology.num_nodes();
 
   for (int order = 0; order < num_nodes; ++order) {
     const int node = workspace_.postorder_nodes[order];
@@ -655,12 +713,10 @@ void LQR::solve(Output &output) {
       const int child_dim = input_.dimensions.get_state_dim(child);
       const int control_dim = input_.dimensions.get_control_dim(edge);
 
-      const auto A_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.A[edge], child_dim,
-                                            node_dim);
-      const auto B_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.B[edge], child_dim,
-                                            control_dim);
+      const auto A_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.A[edge], child_dim, node_dim);
+      const auto B_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.B[edge], child_dim, control_dim);
       const auto r_edge =
           Eigen::Map<const Eigen::VectorXd>(input_.r[edge], control_dim);
       const auto c_child =
@@ -669,9 +725,8 @@ void LQR::solve(Output &output) {
           Eigen::Map<const Eigen::VectorXd>(input_.delta[child], child_dim);
       const auto v_child =
           Eigen::Map<const Eigen::VectorXd>(workspace_.v[child], child_dim);
-      const auto W_edge =
-          Eigen::Map<const Eigen::MatrixXd>(workspace_.W[edge], child_dim,
-                                            child_dim);
+      const auto W_edge = Eigen::Map<const Eigen::MatrixXd>(
+          workspace_.W[edge], child_dim, child_dim);
       const auto G_edge_factor = Eigen::Map<const Eigen::MatrixXd>(
           workspace_.G_factor[edge], control_dim, control_dim);
       const auto K_edge = Eigen::Map<const Eigen::MatrixXd>(
@@ -710,8 +765,7 @@ void LQR::solve(Output &output) {
   const auto delta_root =
       Eigen::Map<const Eigen::VectorXd>(input_.delta[root], root_dim);
   const auto V_root =
-      Eigen::Map<const Eigen::MatrixXd>(workspace_.V[root], root_dim,
-                                        root_dim);
+      Eigen::Map<const Eigen::MatrixXd>(workspace_.V[root], root_dim, root_dim);
   const auto v_root =
       Eigen::Map<const Eigen::VectorXd>(workspace_.v[root], root_dim);
   auto f = Eigen::Map<Eigen::VectorXd>(workspace_.f, root_dim);
@@ -740,19 +794,16 @@ void LQR::solve(Output &output) {
       const int child_dim = input_.dimensions.get_state_dim(child);
       const int control_dim = input_.dimensions.get_control_dim(edge);
 
-      const auto A_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.A[edge], child_dim,
-                                            node_dim);
-      const auto B_edge =
-          Eigen::Map<const Eigen::MatrixXd>(input_.B[edge], child_dim,
-                                            control_dim);
+      const auto A_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.A[edge], child_dim, node_dim);
+      const auto B_edge = Eigen::Map<const Eigen::MatrixXd>(
+          input_.B[edge], child_dim, control_dim);
       const auto K_edge = Eigen::Map<const Eigen::MatrixXd>(
           workspace_.K[edge], control_dim, node_dim);
       const auto k_edge =
           Eigen::Map<const Eigen::VectorXd>(workspace_.k[edge], control_dim);
-      const auto V_child =
-          Eigen::Map<const Eigen::MatrixXd>(workspace_.V[child], child_dim,
-                                            child_dim);
+      const auto V_child = Eigen::Map<const Eigen::MatrixXd>(
+          workspace_.V[child], child_dim, child_dim);
       const auto v_child =
           Eigen::Map<const Eigen::VectorXd>(workspace_.v[child], child_dim);
       const auto c_child =
@@ -760,8 +811,7 @@ void LQR::solve(Output &output) {
       const auto delta_child =
           Eigen::Map<const Eigen::VectorXd>(input_.delta[child], child_dim);
 
-      auto u_edge =
-          Eigen::Map<Eigen::VectorXd>(output.u[edge], control_dim);
+      auto u_edge = Eigen::Map<Eigen::VectorXd>(output.u[edge], control_dim);
       auto x_child = Eigen::Map<Eigen::VectorXd>(output.x[child], child_dim);
       auto y_child = Eigen::Map<Eigen::VectorXd>(output.y[child], child_dim);
       auto f_child = Eigen::Map<Eigen::VectorXd>(workspace_.f, child_dim);

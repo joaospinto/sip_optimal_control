@@ -15,14 +15,14 @@ auto solve(const Input &input, const ::sip::Settings &settings,
     {
       double *x = mci.x;
       if (mci.new_x) {
-        for (int i = 0; i < input.dimensions.num_stages; ++i) {
+        for (int i = 0; i < input.topology.num_edges; ++i) {
           workspace.model_callback_input.states[i] = x;
           x += input.dimensions.get_state_dim(i);
           workspace.model_callback_input.controls[i] = x;
           x += input.dimensions.get_control_dim(i);
         }
-        workspace.model_callback_input.states[input.dimensions.num_stages] = x;
-        x += input.dimensions.get_state_dim(input.dimensions.num_stages);
+        workspace.model_callback_input.states[input.topology.num_edges] = x;
+        x += input.dimensions.get_state_dim(input.topology.num_edges);
         workspace.model_callback_input.theta = x;
       }
     }
@@ -30,7 +30,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
     {
       double *y = mci.y;
       if (mci.new_y) {
-        for (int i = 0; i <= input.dimensions.num_stages; ++i) {
+        for (int i = 0; i <= input.topology.num_edges; ++i) {
           workspace.model_callback_input.costates[i] = y;
           y += input.dimensions.get_state_dim(i);
           workspace.model_callback_input.equality_constraint_multipliers[i] = y;
@@ -42,7 +42,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
     {
       double *z = mci.z;
       if (mci.new_z) {
-        for (int i = 0; i <= input.dimensions.num_stages; ++i) {
+        for (int i = 0; i <= input.topology.num_edges; ++i) {
           workspace.model_callback_input.inequality_constraint_multipliers[i] =
               z;
           z += input.dimensions.get_g_dim(i);
@@ -55,7 +55,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
     if (mci.new_x) {
       {
         double *grad_f = workspace.gradient_f;
-        for (int i = 0; i < input.dimensions.num_stages; ++i) {
+        for (int i = 0; i < input.topology.num_edges; ++i) {
           std::copy_n(workspace.model_callback_output.df_dx[i],
                       input.dimensions.get_state_dim(i), grad_f);
           grad_f += input.dimensions.get_state_dim(i);
@@ -64,17 +64,16 @@ auto solve(const Input &input, const ::sip::Settings &settings,
           grad_f += input.dimensions.get_control_dim(i);
         }
         std::copy_n(
-            workspace.model_callback_output.df_dx[input.dimensions.num_stages],
-            input.dimensions.get_state_dim(input.dimensions.num_stages),
-            grad_f);
-        grad_f += input.dimensions.get_state_dim(input.dimensions.num_stages);
+            workspace.model_callback_output.df_dx[input.topology.num_edges],
+            input.dimensions.get_state_dim(input.topology.num_edges), grad_f);
+        grad_f += input.dimensions.get_state_dim(input.topology.num_edges);
         std::copy_n(workspace.model_callback_output.df_dtheta,
                     input.dimensions.theta_dim, grad_f);
       }
 
       {
         double *c = workspace.c;
-        for (int i = 0; i <= input.dimensions.num_stages; ++i) {
+        for (int i = 0; i <= input.topology.num_edges; ++i) {
           std::copy_n(workspace.model_callback_output.dyn_res[i],
                       input.dimensions.get_state_dim(i), c);
           c += input.dimensions.get_state_dim(i);
@@ -86,7 +85,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
 
       {
         double *g = workspace.g;
-        for (int i = 0; i <= input.dimensions.num_stages; ++i) {
+        for (int i = 0; i <= input.topology.num_edges; ++i) {
           std::copy_n(workspace.model_callback_output.g[i],
                       input.dimensions.get_g_dim(i), g);
           g += input.dimensions.get_g_dim(i);
@@ -167,9 +166,9 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       .timeout_callback = std::cref(input.timeout_callback),
       .dimensions =
           {
-              .x_dim = input.dimensions.get_x_dim(),
-              .s_dim = input.dimensions.get_z_dim(),
-              .y_dim = input.dimensions.get_y_dim(),
+              .x_dim = input.dimensions.get_x_dim(input.topology.num_edges),
+              .s_dim = input.dimensions.get_z_dim(input.topology.num_nodes()),
+              .y_dim = input.dimensions.get_y_dim(input.topology.num_nodes()),
           },
   };
 

@@ -16,7 +16,13 @@ namespace {
 struct LQRProblem {
   int state_dim;
   int control_dim;
-  int num_stages;
+  int num_edges;
+  std::vector<int> state_dims;
+  std::vector<int> control_dims;
+  std::vector<int> edge_parents;
+  std::vector<int> edge_children;
+  Dimensions input_dimensions;
+  Topology input_topology;
 
   std::vector<Eigen::MatrixXd> Q;
   std::vector<Eigen::MatrixXd> M;
@@ -39,10 +45,19 @@ struct LQRProblem {
   std::vector<double *> delta_ptr;
 
   LQRProblem(int n, int m, int T)
-      : state_dim(n), control_dim(m), num_stages(T), Q(T + 1), M(T), R(T), A(T),
+      : state_dim(n), control_dim(m), num_edges(T), state_dims(T + 1, n),
+        control_dims(T, m), edge_parents(T), edge_children(T), Q(T + 1), M(T), R(T), A(T),
         B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1), M_ptr(T),
         R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T), c_ptr(T + 1),
         delta_ptr(T + 1) {
+    for (int edge = 0; edge < T; ++edge) {
+      edge_parents[edge] = edge;
+      edge_children[edge] = edge + 1;
+    }
+    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
+                                  nullptr, nullptr};
+    input_topology = Topology{num_edges, 0, edge_parents.data(),
+                              edge_children.data()};
     auto rng = std::mt19937(0);
     auto normal = std::normal_distribution<double>(0.0, 1.0);
     auto uniform = std::uniform_real_distribution<double>(0.0, 1.0);
@@ -95,12 +110,8 @@ struct LQRProblem {
         .B = B_ptr.data(),
         .c = c_ptr.data(),
         .delta = delta_ptr.data(),
-        .dimensions =
-            {
-                .state_dim = state_dim,
-                .control_dim = control_dim,
-                .num_stages = num_stages,
-            },
+        .dimensions = input_dimensions,
+        .topology = input_topology,
     };
   }
 
@@ -138,13 +149,13 @@ private:
   }
 
   void refresh_pointers() {
-    for (int i = 0; i <= num_stages; ++i) {
+    for (int i = 0; i <= num_edges; ++i) {
       Q_ptr[i] = Q[i].data();
       q_ptr[i] = q[i].data();
       c_ptr[i] = c[i].data();
       delta_ptr[i] = delta[i].data();
     }
-    for (int i = 0; i < num_stages; ++i) {
+    for (int i = 0; i < num_edges; ++i) {
       M_ptr[i] = M[i].data();
       R_ptr[i] = R[i].data();
       A_ptr[i] = A[i].data();
@@ -189,29 +200,15 @@ struct VariableTopology {
   std::vector<int> parent;
   std::vector<int> child;
 
-  static auto root(const void *) -> int { return 0; }
-
-  static auto edge_parent(const void *context, const int edge) -> int {
-    return static_cast<const VariableTopology *>(context)->parent[edge];
-  }
-
-  static auto edge_child(const void *context, const int edge) -> int {
-    return static_cast<const VariableTopology *>(context)->child[edge];
-  }
-
-  auto input() const -> LQR::Input::Topology {
-    return LQR::Input::Topology{
-        .context = this,
-        .root = VariableTopology::root,
-        .edge_parent = VariableTopology::edge_parent,
-        .edge_child = VariableTopology::edge_child,
-    };
+  auto input() const -> Topology {
+    return Topology{static_cast<int>(parent.size()), 0, parent.data(),
+                    child.data()};
   }
 };
 
 struct VariableLQRProblem {
   enum class Shape {
-    HETEROGENEOUS_PATH = 0,
+    HETEROGENEOUS_CHAIN = 0,
     SHALLOW_WIDE_TREE = 1,
     BINARY_TREE = 2,
   };
@@ -222,6 +219,8 @@ struct VariableLQRProblem {
   std::vector<int> state_dims;
   std::vector<int> control_dims;
   VariableTopology topology;
+  Dimensions input_dimensions;
+  Topology input_topology;
 
   std::vector<Eigen::MatrixXd> Q;
   std::vector<Eigen::MatrixXd> M;
@@ -246,12 +245,12 @@ struct VariableLQRProblem {
   VariableLQRProblem(const Shape shape_in, const int T, const int base_n,
                      const int base_m)
       : num_edges(T), shape(shape_in),
-        uses_explicit_topology(shape_in != Shape::HETEROGENEOUS_PATH),
-        state_dims(T + 1), control_dims(T), topology{std::vector<int>(T),
-                                                     std::vector<int>(T)},
-        Q(T + 1), M(T), R(T), A(T), B(T), q(T + 1), r(T), c(T + 1),
-        delta(T + 1), Q_ptr(T + 1), M_ptr(T), R_ptr(T), A_ptr(T), B_ptr(T),
-        q_ptr(T + 1), r_ptr(T), c_ptr(T + 1), delta_ptr(T + 1) {
+        uses_explicit_topology(shape_in != Shape::HETEROGENEOUS_CHAIN),
+        state_dims(T + 1), control_dims(T),
+        topology{std::vector<int>(T), std::vector<int>(T)}, Q(T + 1), M(T),
+        R(T), A(T), B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1),
+        M_ptr(T), R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T),
+        c_ptr(T + 1), delta_ptr(T + 1) {
     for (int node = 0; node <= T; ++node) {
       state_dims[node] = std::max(1, base_n + (node % 3) - 1);
     }
@@ -260,7 +259,7 @@ struct VariableLQRProblem {
       const int child = edge + 1;
       topology.child[edge] = child;
       switch (shape) {
-      case Shape::HETEROGENEOUS_PATH:
+      case Shape::HETEROGENEOUS_CHAIN:
         topology.parent[edge] = edge;
         break;
       case Shape::SHALLOW_WIDE_TREE:
@@ -305,6 +304,9 @@ struct VariableLQRProblem {
     }
 
     refresh_pointers();
+    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
+                                  nullptr, nullptr};
+    input_topology = topology.input();
   }
 
   auto input() -> LQR::Input {
@@ -319,22 +321,14 @@ struct VariableLQRProblem {
         .B = B_ptr.data(),
         .c = c_ptr.data(),
         .delta = delta_ptr.data(),
-        .dimensions =
-            {
-                .state_dim = 0,
-                .control_dim = 0,
-                .num_stages = num_edges,
-                .state_dims = state_dims.data(),
-                .control_dims = control_dims.data(),
-            },
-        .topology = uses_explicit_topology ? topology.input()
-                                           : LQR::Input::Topology{},
+        .dimensions = input_dimensions,
+        .topology = input_topology,
     };
   }
 
   auto shape_name() const -> const char * {
     switch (shape) {
-    case Shape::HETEROGENEOUS_PATH:
+    case Shape::HETEROGENEOUS_CHAIN:
       return "heterogeneous_path";
     case Shape::SHALLOW_WIDE_TREE:
       return "shallow_wide_tree";
@@ -347,8 +341,7 @@ struct VariableLQRProblem {
 private:
   static auto random_matrix(std::mt19937 &rng,
                             std::normal_distribution<double> &normal,
-                            const int rows, const int cols)
-      -> Eigen::MatrixXd {
+                            const int rows, const int cols) -> Eigen::MatrixXd {
     auto matrix = Eigen::MatrixXd(rows, cols);
     for (int col = 0; col < cols; ++col) {
       for (int row = 0; row < rows; ++row) {
@@ -430,7 +423,7 @@ struct VariableLQROutputStorage {
 
 auto compute_residual_norm(const LQRProblem &problem,
                            const LQROutputStorage &output) -> double {
-  const int T = problem.num_stages;
+  const int T = problem.num_edges;
   double squared_norm = 0.0;
 
   for (int i = 0; i < T; ++i) {
@@ -453,8 +446,8 @@ auto compute_residual_norm(const LQRProblem &problem,
   }
 
   const Eigen::VectorXd terminal_stationarity =
-      problem.Q[T].selfadjointView<Eigen::Lower>() * output.x[T] -
-      output.y[T] + problem.q[T];
+      problem.Q[T].selfadjointView<Eigen::Lower>() * output.x[T] - output.y[T] +
+      problem.q[T];
   const Eigen::VectorXd initial_dynamics =
       -output.x[0] - problem.delta[0].cwiseProduct(output.y[0]) + problem.c[0];
 
@@ -533,7 +526,7 @@ void set_residual_counter(benchmark::State &state, LQRProblem &problem,
   }
 
   auto output_storage = LQROutputStorage(problem.state_dim, problem.control_dim,
-                                         problem.num_stages);
+                                         problem.num_edges);
   auto output = output_storage.output();
   lqr.solve(output);
 
@@ -542,10 +535,10 @@ void set_residual_counter(benchmark::State &state, LQRProblem &problem,
 }
 
 void Args(benchmark::Benchmark *benchmark) {
-  for (const int num_stages : {16, 32, 64, 128}) {
+  for (const int num_edges : {16, 32, 64, 128}) {
     for (const int state_dim : {4, 6, 8, 16}) {
       for (const int control_dim : {1, 2, 3, 4}) {
-        benchmark->Args({num_stages, state_dim, control_dim});
+        benchmark->Args({num_edges, state_dim, control_dim});
       }
     }
   }
@@ -678,7 +671,7 @@ void BM_LQRVariableFactor(benchmark::State &state) {
   auto problem = make_variable_problem(state);
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
   state.SetLabel(problem.shape_name());
 
@@ -701,7 +694,7 @@ void BM_LQRVariableSolve(benchmark::State &state) {
   auto problem = make_variable_problem(state);
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
   state.SetLabel(problem.shape_name());
   if (lqr.factor_with_status() != LQR::FactorStatus::SUCCESS) {
@@ -727,7 +720,7 @@ void BM_LQRVariableFactorSolve(benchmark::State &state) {
   auto problem = make_variable_problem(state);
   auto input = problem.input();
   LQR::Workspace workspace;
-  workspace.reserve(input.dimensions);
+  workspace.reserve(input.dimensions, input.topology);
   auto lqr = LQR(input, workspace);
   auto output_storage = VariableLQROutputStorage(problem);
   auto output = output_storage.output();
