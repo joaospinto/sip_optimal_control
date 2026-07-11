@@ -4,6 +4,7 @@
 
 #include <benchmark/benchmark.h>
 
+#include <algorithm>
 #include <cmath>
 #include <random>
 #include <string>
@@ -184,6 +185,249 @@ struct LQROutputStorage {
   }
 };
 
+struct VariableTopology {
+  std::vector<int> parent;
+  std::vector<int> child;
+
+  static auto root(const void *) -> int { return 0; }
+
+  static auto edge_parent(const void *context, const int edge) -> int {
+    return static_cast<const VariableTopology *>(context)->parent[edge];
+  }
+
+  static auto edge_child(const void *context, const int edge) -> int {
+    return static_cast<const VariableTopology *>(context)->child[edge];
+  }
+
+  auto input() const -> LQR::Input::Topology {
+    return LQR::Input::Topology{
+        .context = this,
+        .root = VariableTopology::root,
+        .edge_parent = VariableTopology::edge_parent,
+        .edge_child = VariableTopology::edge_child,
+    };
+  }
+};
+
+struct VariableLQRProblem {
+  enum class Shape {
+    HETEROGENEOUS_PATH = 0,
+    SHALLOW_WIDE_TREE = 1,
+    BINARY_TREE = 2,
+  };
+
+  int num_edges;
+  Shape shape;
+  bool uses_explicit_topology;
+  std::vector<int> state_dims;
+  std::vector<int> control_dims;
+  VariableTopology topology;
+
+  std::vector<Eigen::MatrixXd> Q;
+  std::vector<Eigen::MatrixXd> M;
+  std::vector<Eigen::MatrixXd> R;
+  std::vector<Eigen::MatrixXd> A;
+  std::vector<Eigen::MatrixXd> B;
+  std::vector<Eigen::VectorXd> q;
+  std::vector<Eigen::VectorXd> r;
+  std::vector<Eigen::VectorXd> c;
+  std::vector<Eigen::VectorXd> delta;
+
+  std::vector<double *> Q_ptr;
+  std::vector<double *> M_ptr;
+  std::vector<double *> R_ptr;
+  std::vector<double *> A_ptr;
+  std::vector<double *> B_ptr;
+  std::vector<double *> q_ptr;
+  std::vector<double *> r_ptr;
+  std::vector<double *> c_ptr;
+  std::vector<double *> delta_ptr;
+
+  VariableLQRProblem(const Shape shape_in, const int T, const int base_n,
+                     const int base_m)
+      : num_edges(T), shape(shape_in),
+        uses_explicit_topology(shape_in != Shape::HETEROGENEOUS_PATH),
+        state_dims(T + 1), control_dims(T), topology{std::vector<int>(T),
+                                                     std::vector<int>(T)},
+        Q(T + 1), M(T), R(T), A(T), B(T), q(T + 1), r(T), c(T + 1),
+        delta(T + 1), Q_ptr(T + 1), M_ptr(T), R_ptr(T), A_ptr(T), B_ptr(T),
+        q_ptr(T + 1), r_ptr(T), c_ptr(T + 1), delta_ptr(T + 1) {
+    for (int node = 0; node <= T; ++node) {
+      state_dims[node] = std::max(1, base_n + (node % 3) - 1);
+    }
+    for (int edge = 0; edge < T; ++edge) {
+      control_dims[edge] = std::max(1, base_m + (edge % 3) - 1);
+      const int child = edge + 1;
+      topology.child[edge] = child;
+      switch (shape) {
+      case Shape::HETEROGENEOUS_PATH:
+        topology.parent[edge] = edge;
+        break;
+      case Shape::SHALLOW_WIDE_TREE:
+        topology.parent[edge] = 0;
+        break;
+      case Shape::BINARY_TREE:
+        topology.parent[edge] = (child - 1) / 2;
+        break;
+      }
+    }
+
+    auto rng = std::mt19937(17 + 31 * static_cast<int>(shape));
+    auto normal = std::normal_distribution<double>(0.0, 1.0);
+    auto uniform = std::uniform_real_distribution<double>(0.0, 1.0);
+
+    for (int node = 0; node <= T; ++node) {
+      const int n = state_dims[node];
+      const auto S_root = random_matrix(rng, normal, n, n);
+      Q[node].noalias() = S_root.transpose() * S_root;
+      Q[node].diagonal().array() += 1e-3;
+      q[node] = random_vector(rng, normal, n);
+      c[node] = random_vector(rng, normal, n);
+      delta[node] = positive_delta(rng, uniform, n);
+    }
+
+    for (int edge = 0; edge < T; ++edge) {
+      const int parent = topology.parent[edge];
+      const int child = topology.child[edge];
+      const int n_parent = state_dims[parent];
+      const int n_child = state_dims[child];
+      const int m = control_dims[edge];
+
+      A[edge] = 0.05 * random_matrix(rng, normal, n_child, n_parent);
+      B[edge] = 0.1 * random_matrix(rng, normal, n_child, m);
+      M[edge] = Eigen::MatrixXd::Zero(n_parent, m);
+
+      const auto R_root = random_matrix(rng, normal, m, m);
+      R[edge].noalias() = R_root.transpose() * R_root;
+      R[edge].diagonal().array() += 1.0;
+
+      r[edge] = random_vector(rng, normal, m);
+    }
+
+    refresh_pointers();
+  }
+
+  auto input() -> LQR::Input {
+    refresh_pointers();
+    return LQR::Input{
+        .Q = Q_ptr.data(),
+        .M = M_ptr.data(),
+        .R = R_ptr.data(),
+        .q = q_ptr.data(),
+        .r = r_ptr.data(),
+        .A = A_ptr.data(),
+        .B = B_ptr.data(),
+        .c = c_ptr.data(),
+        .delta = delta_ptr.data(),
+        .dimensions =
+            {
+                .state_dim = 0,
+                .control_dim = 0,
+                .num_stages = num_edges,
+                .state_dims = state_dims.data(),
+                .control_dims = control_dims.data(),
+            },
+        .topology = uses_explicit_topology ? topology.input()
+                                           : LQR::Input::Topology{},
+    };
+  }
+
+  auto shape_name() const -> const char * {
+    switch (shape) {
+    case Shape::HETEROGENEOUS_PATH:
+      return "heterogeneous_path";
+    case Shape::SHALLOW_WIDE_TREE:
+      return "shallow_wide_tree";
+    case Shape::BINARY_TREE:
+      return "binary_tree";
+    }
+    return "unknown";
+  }
+
+private:
+  static auto random_matrix(std::mt19937 &rng,
+                            std::normal_distribution<double> &normal,
+                            const int rows, const int cols)
+      -> Eigen::MatrixXd {
+    auto matrix = Eigen::MatrixXd(rows, cols);
+    for (int col = 0; col < cols; ++col) {
+      for (int row = 0; row < rows; ++row) {
+        matrix(row, col) = normal(rng);
+      }
+    }
+    return matrix;
+  }
+
+  static auto random_vector(std::mt19937 &rng,
+                            std::normal_distribution<double> &normal,
+                            const int rows) -> Eigen::VectorXd {
+    auto vector = Eigen::VectorXd(rows);
+    for (int row = 0; row < rows; ++row) {
+      vector(row) = normal(rng);
+    }
+    return vector;
+  }
+
+  static auto positive_delta(std::mt19937 &rng,
+                             std::uniform_real_distribution<double> &uniform,
+                             const int rows) -> Eigen::VectorXd {
+    auto vector = Eigen::VectorXd(rows);
+    for (int row = 0; row < rows; ++row) {
+      vector(row) = 1e-3 + 1e-1 * uniform(rng);
+    }
+    return vector;
+  }
+
+  void refresh_pointers() {
+    for (int node = 0; node <= num_edges; ++node) {
+      Q_ptr[node] = Q[node].data();
+      q_ptr[node] = q[node].data();
+      c_ptr[node] = c[node].data();
+      delta_ptr[node] = delta[node].data();
+    }
+    for (int edge = 0; edge < num_edges; ++edge) {
+      M_ptr[edge] = M[edge].data();
+      R_ptr[edge] = R[edge].data();
+      A_ptr[edge] = A[edge].data();
+      B_ptr[edge] = B[edge].data();
+      r_ptr[edge] = r[edge].data();
+    }
+  }
+};
+
+struct VariableLQROutputStorage {
+  std::vector<Eigen::VectorXd> x;
+  std::vector<Eigen::VectorXd> u;
+  std::vector<Eigen::VectorXd> y;
+  std::vector<double *> x_ptr;
+  std::vector<double *> u_ptr;
+  std::vector<double *> y_ptr;
+
+  explicit VariableLQROutputStorage(const VariableLQRProblem &problem)
+      : x(problem.num_edges + 1), u(problem.num_edges),
+        y(problem.num_edges + 1), x_ptr(problem.num_edges + 1),
+        u_ptr(problem.num_edges), y_ptr(problem.num_edges + 1) {
+    for (int node = 0; node <= problem.num_edges; ++node) {
+      x[node] = Eigen::VectorXd::Zero(problem.state_dims[node]);
+      y[node] = Eigen::VectorXd::Zero(problem.state_dims[node]);
+      x_ptr[node] = x[node].data();
+      y_ptr[node] = y[node].data();
+    }
+    for (int edge = 0; edge < problem.num_edges; ++edge) {
+      u[edge] = Eigen::VectorXd::Zero(problem.control_dims[edge]);
+      u_ptr[edge] = u[edge].data();
+    }
+  }
+
+  auto output() -> LQR::Output {
+    return LQR::Output{
+        .x = x_ptr.data(),
+        .u = u_ptr.data(),
+        .y = y_ptr.data(),
+    };
+  }
+};
+
 auto compute_residual_norm(const LQRProblem &problem,
                            const LQROutputStorage &output) -> double {
   const int T = problem.num_stages;
@@ -220,6 +464,46 @@ auto compute_residual_norm(const LQRProblem &problem,
   return std::sqrt(squared_norm);
 }
 
+auto compute_residual_norm(const VariableLQRProblem &problem,
+                           const VariableLQROutputStorage &output) -> double {
+  double squared_norm = 0.0;
+
+  for (int node = 0; node <= problem.num_edges; ++node) {
+    Eigen::VectorXd stationarity_x =
+        problem.Q[node].selfadjointView<Eigen::Lower>() * output.x[node] -
+        output.y[node] + problem.q[node];
+    for (int edge = 0; edge < problem.num_edges; ++edge) {
+      if (problem.topology.parent[edge] == node) {
+        const int child = problem.topology.child[edge];
+        stationarity_x += problem.M[edge] * output.u[edge] +
+                          problem.A[edge].transpose() * output.y[child];
+      }
+    }
+    squared_norm += stationarity_x.squaredNorm();
+  }
+
+  for (int edge = 0; edge < problem.num_edges; ++edge) {
+    const int parent = problem.topology.parent[edge];
+    const int child = problem.topology.child[edge];
+    const Eigen::VectorXd stationarity_u =
+        problem.M[edge].transpose() * output.x[parent] +
+        problem.R[edge].selfadjointView<Eigen::Lower>() * output.u[edge] +
+        problem.B[edge].transpose() * output.y[child] + problem.r[edge];
+    const Eigen::VectorXd dynamics =
+        problem.A[edge] * output.x[parent] + problem.B[edge] * output.u[edge] -
+        output.x[child] + problem.c[child] -
+        problem.delta[child].cwiseProduct(output.y[child]);
+    squared_norm += stationarity_u.squaredNorm();
+    squared_norm += dynamics.squaredNorm();
+  }
+
+  const Eigen::VectorXd root_dynamics =
+      -output.x[0] - problem.delta[0].cwiseProduct(output.y[0]) + problem.c[0];
+  squared_norm += root_dynamics.squaredNorm();
+
+  return std::sqrt(squared_norm);
+}
+
 auto factor_status_name(const LQR::FactorStatus status) -> const char * {
   switch (status) {
   case LQR::FactorStatus::SUCCESS:
@@ -230,6 +514,8 @@ auto factor_status_name(const LQR::FactorStatus status) -> const char * {
     return "F_FACTORIZATION_FAILURE";
   case LQR::FactorStatus::G_FACTORIZATION_FAILURE:
     return "G_FACTORIZATION_FAILURE";
+  case LQR::FactorStatus::INVALID_TOPOLOGY:
+    return "INVALID_TOPOLOGY";
   }
   return "UNKNOWN";
 }
@@ -263,6 +549,44 @@ void Args(benchmark::Benchmark *benchmark) {
       }
     }
   }
+}
+
+void VariableArgs(benchmark::Benchmark *benchmark) {
+  for (const int shape : {0, 1, 2}) {
+    for (const int num_edges : {31, 63}) {
+      for (const int base_state_dim : {4, 8}) {
+        benchmark->Args({shape, num_edges, base_state_dim, 2});
+      }
+    }
+  }
+}
+
+auto make_variable_problem(benchmark::State &state) -> VariableLQRProblem {
+  const auto shape = static_cast<VariableLQRProblem::Shape>(state.range(0));
+  return VariableLQRProblem(shape, static_cast<int>(state.range(1)),
+                            static_cast<int>(state.range(2)),
+                            static_cast<int>(state.range(3)));
+}
+
+void set_variable_residual_counter(benchmark::State &state,
+                                   VariableLQRProblem &problem,
+                                   LQR::Workspace &workspace) {
+  auto input = problem.input();
+  auto lqr = LQR(input, workspace);
+  const auto status = lqr.factor_with_status();
+  if (status != LQR::FactorStatus::SUCCESS) {
+    state.SkipWithError(
+        (std::string("LQR factorization failed: ") + factor_status_name(status))
+            .c_str());
+    return;
+  }
+
+  auto output_storage = VariableLQROutputStorage(problem);
+  auto output = output_storage.output();
+  lqr.solve(output);
+
+  state.counters["residual_norm"] =
+      compute_residual_norm(problem, output_storage);
 }
 
 void BM_LQRFactor(benchmark::State &state) {
@@ -350,9 +674,88 @@ void BM_LQRFactorSolve(benchmark::State &state) {
   workspace.free(T);
 }
 
+void BM_LQRVariableFactor(benchmark::State &state) {
+  auto problem = make_variable_problem(state);
+  auto input = problem.input();
+  LQR::Workspace workspace;
+  workspace.reserve(input.dimensions);
+  auto lqr = LQR(input, workspace);
+  state.SetLabel(problem.shape_name());
+
+  for (auto _ : state) {
+    const auto status = lqr.factor_with_status();
+    benchmark::DoNotOptimize(static_cast<int>(status));
+    if (status != LQR::FactorStatus::SUCCESS) {
+      state.SkipWithError((std::string("LQR factorization failed: ") +
+                           factor_status_name(status))
+                              .c_str());
+      break;
+    }
+  }
+
+  set_variable_residual_counter(state, problem, workspace);
+  workspace.free(problem.num_edges);
+}
+
+void BM_LQRVariableSolve(benchmark::State &state) {
+  auto problem = make_variable_problem(state);
+  auto input = problem.input();
+  LQR::Workspace workspace;
+  workspace.reserve(input.dimensions);
+  auto lqr = LQR(input, workspace);
+  state.SetLabel(problem.shape_name());
+  if (lqr.factor_with_status() != LQR::FactorStatus::SUCCESS) {
+    state.SkipWithError("LQR factorization failed");
+    workspace.free(problem.num_edges);
+    return;
+  }
+
+  auto output_storage = VariableLQROutputStorage(problem);
+  auto output = output_storage.output();
+
+  for (auto _ : state) {
+    lqr.solve(output);
+    benchmark::DoNotOptimize(output.x[0][0]);
+  }
+
+  state.counters["residual_norm"] =
+      compute_residual_norm(problem, output_storage);
+  workspace.free(problem.num_edges);
+}
+
+void BM_LQRVariableFactorSolve(benchmark::State &state) {
+  auto problem = make_variable_problem(state);
+  auto input = problem.input();
+  LQR::Workspace workspace;
+  workspace.reserve(input.dimensions);
+  auto lqr = LQR(input, workspace);
+  auto output_storage = VariableLQROutputStorage(problem);
+  auto output = output_storage.output();
+  state.SetLabel(problem.shape_name());
+
+  for (auto _ : state) {
+    const auto status = lqr.factor_with_status();
+    if (status != LQR::FactorStatus::SUCCESS) {
+      state.SkipWithError((std::string("LQR factorization failed: ") +
+                           factor_status_name(status))
+                              .c_str());
+      break;
+    }
+    lqr.solve(output);
+    benchmark::DoNotOptimize(output.x[0][0]);
+  }
+
+  state.counters["residual_norm"] =
+      compute_residual_norm(problem, output_storage);
+  workspace.free(problem.num_edges);
+}
+
 BENCHMARK(BM_LQRFactor)->Apply(Args);
 BENCHMARK(BM_LQRSolve)->Apply(Args);
 BENCHMARK(BM_LQRFactorSolve)->Apply(Args);
+BENCHMARK(BM_LQRVariableFactor)->Apply(VariableArgs);
+BENCHMARK(BM_LQRVariableSolve)->Apply(VariableArgs);
+BENCHMARK(BM_LQRVariableFactorSolve)->Apply(VariableArgs);
 
 } // namespace
 } // namespace sip::optimal_control

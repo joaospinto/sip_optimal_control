@@ -12,3 +12,16 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "variable_dimensions_test",
+    size = "small",
+    srcs = ["variable_dimensions_test.cpp"],
+    linkstatic = True,
+    deps = [
+        "//sip_optimal_control:helpers",
+        "@eigen",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

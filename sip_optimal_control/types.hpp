@@ -5,10 +5,133 @@
 
 #include <Eigen/Core>
 
+#include <cstddef>
+
 namespace sip::optimal_control {
 
+struct Dimensions {
+  int num_stages;
+  int state_dim;
+  int control_dim;
+  int c_dim;
+  int g_dim;
+  // Number of dense global variables eliminated through the Schur complement.
+  // Non-tree DAG separator variables should be represented in this block.
+  int theta_dim = 0;
+  const int *state_dims = nullptr;
+  const int *control_dims = nullptr;
+  const int *c_dims = nullptr;
+  const int *g_dims = nullptr;
+
+  int num_nodes() const { return num_stages + 1; }
+  int num_edges() const { return num_stages; }
+  int get_schur_dim() const { return theta_dim; }
+  int get_state_dim(const int node) const {
+    return state_dims == nullptr ? state_dim : state_dims[node];
+  }
+  int get_control_dim(const int edge) const {
+    return control_dims == nullptr ? control_dim : control_dims[edge];
+  }
+  int get_c_dim(const int node) const {
+    return c_dims == nullptr ? c_dim : c_dims[node];
+  }
+  int get_g_dim(const int node) const {
+    return g_dims == nullptr ? g_dim : g_dims[node];
+  }
+  int max_state_dim() const {
+    int result = 0;
+    for (int node = 0; node < num_nodes(); ++node) {
+      const int dim = get_state_dim(node);
+      result = result < dim ? dim : result;
+    }
+    return result;
+  }
+  int max_control_dim() const {
+    int result = 0;
+    for (int edge = 0; edge < num_edges(); ++edge) {
+      const int dim = get_control_dim(edge);
+      result = result < dim ? dim : result;
+    }
+    return result;
+  }
+  int max_c_dim() const {
+    int result = 0;
+    for (int node = 0; node < num_nodes(); ++node) {
+      const int dim = get_c_dim(node);
+      result = result < dim ? dim : result;
+    }
+    return result;
+  }
+  int max_g_dim() const {
+    int result = 0;
+    for (int node = 0; node < num_nodes(); ++node) {
+      const int dim = get_g_dim(node);
+      result = result < dim ? dim : result;
+    }
+    return result;
+  }
+
+  int get_stagewise_x_dim() const {
+    int result = get_state_dim(num_stages);
+    for (int edge = 0; edge < num_edges(); ++edge) {
+      result += get_state_dim(edge) + get_control_dim(edge);
+    }
+    return result;
+  }
+
+  int get_x_dim() const { return get_stagewise_x_dim() + theta_dim; }
+
+  int get_y_dim() const {
+    int result = 0;
+    for (int node = 0; node < num_nodes(); ++node) {
+      result += get_state_dim(node) + get_c_dim(node);
+    }
+    return result;
+  }
+
+  int get_z_dim() const {
+    int result = 0;
+    for (int node = 0; node < num_nodes(); ++node) {
+      result += get_g_dim(node);
+    }
+    return result;
+  }
+
+  int get_stagewise_kkt_dim() const {
+    return get_stagewise_x_dim() + get_y_dim() + get_z_dim();
+  }
+
+  int get_x_state_offset(const int node) const {
+    int offset = 0;
+    for (int edge = 0; edge < node; ++edge) {
+      offset += get_state_dim(edge) + get_control_dim(edge);
+    }
+    return offset;
+  }
+  int get_x_control_offset(const int edge) const {
+    return get_x_state_offset(edge) + get_state_dim(edge);
+  }
+  int get_y_dyn_offset(const int node) const {
+    int offset = 0;
+    for (int i = 0; i < node; ++i) {
+      offset += get_state_dim(i) + get_c_dim(i);
+    }
+    return offset;
+  }
+  int get_y_c_offset(const int node) const {
+    return get_y_dyn_offset(node) + get_state_dim(node);
+  }
+  int get_z_offset(const int node) const {
+    int offset = 0;
+    for (int i = 0; i < node; ++i) {
+      offset += get_g_dim(i);
+    }
+    return offset;
+  }
+};
+
 struct ModelCallbackInput {
-  // The cross-stage variables, shared by all stages.
+  // Dense global/separator variables shared by all stages.
   double *theta;
   // The states.
   double **states;
@@ -41,7 +164,8 @@ struct ModelCallbackOutput {
   double **df_dx;
   // The first derivative of the cost with respect to controls.
   double **df_du;
-  // The first derivative of the cost with respect to cross-stage variables.
+  // The first derivative of the cost with respect to global/separator
+  // variables.
   double *df_dtheta;
 
   // The dynamics residuals (x_init - x_0 and dyn_i(x_i, u_i) - x_{i+1}).
@@ -50,7 +174,7 @@ struct ModelCallbackOutput {
   double **ddyn_dx;
   // The first derivative of the dyn_i with respect to the controls.
   double **ddyn_du;
-  // The first derivative of the dyn_i with respect to cross-stage variables.
+  // The first derivative of dyn_i with respect to global/separator variables.
   double **ddyn_dtheta;
 
   // The equality constraint values (c(x) = 0); excludes the dynamics.
@@ -59,7 +183,7 @@ struct ModelCallbackOutput {
   double **dc_dx;
   // The first derivative of the c(x) with respect to the controls.
   double **dc_du;
-  // The first derivative of the c(x) with respect to cross-stage variables.
+  // The first derivative of c(x) with respect to global/separator variables.
   double **dc_dtheta;
 
   // The inequality constraint values (g(x) <= 0).
@@ -68,7 +192,7 @@ struct ModelCallbackOutput {
   double **dg_dx;
   // The first derivative of the g(x) with respect to the controls.
   double **dg_du;
-  // The first derivative of the g(x) with respect to cross-stage variables.
+  // The first derivative of g(x) with respect to global/separator variables.
   double **dg_dtheta;
 
   // The second derivative of the Lagrangian with respect to states.
@@ -79,12 +203,12 @@ struct ModelCallbackOutput {
   // The second derivative of the Lagrangian with respect to controls.
   double **d2L_du2;
   // The second derivative of the Lagrangian with respect to states and
-  // cross-stage variables.
+  // global/separator variables.
   double **d2L_dxdtheta;
   // The second derivative of the Lagrangian with respect to controls and
-  // cross-stage variables.
+  // global/separator variables.
   double **d2L_dudtheta;
-  // The second derivative of the Lagrangian with respect to cross-stage
+  // The second derivative of the Lagrangian with respect to global/separator
   // variables.
   double *d2L_dtheta2;
   // The user should provide the true Lagrangian Hessian blocks. SIP applies
@@ -94,11 +218,13 @@ struct ModelCallbackOutput {
   // To dynamically allocate the required memory.
   void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
                int g_dim, int theta_dim = 0);
+  void reserve(const Dimensions &dimensions);
   void free(int num_stages);
 
   // For using pre-allocated (possibly statically allocated) memory.
   auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
                   int g_dim, unsigned char *mem_ptr, int theta_dim = 0) -> int;
+  auto mem_assign(const Dimensions &dimensions, unsigned char *mem_ptr) -> int;
 
   // For knowing how much memory to pre-allocate.
   static constexpr auto num_bytes(int state_dim, int control_dim,
@@ -156,32 +282,12 @@ struct ModelCallbackOutput {
            d2L_du2_size + d2L_dxdtheta_size + d2L_dudtheta_size +
            d2L_dtheta2_size;
   }
+  static auto num_bytes(const Dimensions &dimensions) -> int;
 };
 
 struct Input {
-  struct Dimensions {
-    int num_stages;
-    int state_dim;
-    int control_dim;
-    int c_dim;
-    int g_dim;
-    // Number of cross-stage variables shared by every stage.
-    int theta_dim = 0;
-
-    int get_stagewise_x_dim() const {
-      return num_stages * (state_dim + control_dim) + state_dim;
-    }
-
-    int get_x_dim() const { return get_stagewise_x_dim() + theta_dim; }
-
-    int get_y_dim() const { return (c_dim + state_dim) * (num_stages + 1); }
-
-    int get_z_dim() const { return g_dim * (num_stages + 1); }
-
-    int get_stagewise_kkt_dim() const {
-      return get_stagewise_x_dim() + get_y_dim() + get_z_dim();
-    }
-  };
+  using Dimensions = ::sip::optimal_control::Dimensions;
+  using Topology = LQR::Input::Topology;
   using ModelCallback = std::function<void(const ModelCallbackInput &)>;
 
   // Callback for filling the ModelCallbackOutput object.
@@ -190,7 +296,20 @@ struct Input {
   ::sip::Input::TimeoutCallback timeout_callback;
   // The problem dimensions.
   Dimensions dimensions;
+  // Optional rooted-tree topology for direct Riccati elimination. When omitted,
+  // edges use the chain topology edge -> (edge, edge + 1). Non-tree DAG
+  // linkages should be condensed into theta and handled through the dense
+  // Schur complement blocks above.
+  Topology topology = {};
 };
+
+enum class InputValidationStatus {
+  SUCCESS = 0,
+  INVALID_DIMENSIONS = 1,
+  INVALID_TOPOLOGY = 2,
+};
+
+auto validate_input(const Input &input) -> InputValidationStatus;
 
 struct Workspace {
   struct RegularizedLQRData {
@@ -210,16 +329,19 @@ struct Workspace {
     double *theta_schur_factor;
     double *theta_rhs;
     double *theta_stagewise_rhs;
+    double *stagewise_scratch;
 
     // To dynamically allocate the required memory.
     void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
                  int g_dim, int theta_dim = 0);
+    void reserve(const Dimensions &dimensions);
     void free(int num_stages);
 
     // For using pre-allocated (possibly statically allocated) memory.
     auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
                     int g_dim, unsigned char *mem_ptr, int theta_dim = 0)
         -> int;
+    auto mem_assign(const Dimensions &dimensions, unsigned char *mem_ptr) -> int;
 
     // For knowing how much memory to pre-allocate.
     static constexpr auto num_bytes(int state_dim, int control_dim,
@@ -230,6 +352,7 @@ struct Workspace {
       const int n = state_dim;
       const int m = control_dim;
       const int p = theta_dim;
+      const int num_rhs = p > 0 ? p : 1;
       const int stagewise_x_dim = T * (n + m) + n;
       const int y_dim = (c_dim + n) * (T + 1);
       const int z_dim = g_dim * (T + 1);
@@ -255,21 +378,26 @@ struct Workspace {
                    stagewise_kkt_dim) *
                       static_cast<int>(sizeof(double))
                 : 0;
+      const int stagewise_scratch_size =
+          2 * n * num_rhs * static_cast<int>(sizeof(double));
 
       return mod_w_inv_size + Q_mod_size + M_mod_size + R_mod_size +
              q_mod_size + r_mod_size + c_mod_size + dyn_r2_size +
-             c_r2_inv_size + theta_data_size;
+             c_r2_inv_size + theta_data_size + stagewise_scratch_size;
     }
+    static auto num_bytes(const Dimensions &dimensions) -> int;
   };
 
   // To dynamically allocate the required memory.
   void reserve(int state_dim, int control_dim, int num_stages, int c_dim,
                int g_dim, int theta_dim = 0);
+  void reserve(const Dimensions &dimensions);
   void free(int num_stages);
 
   // For using pre-allocated (possibly statically allocated) memory.
   auto mem_assign(int state_dim, int control_dim, int num_stages, int c_dim,
                   int g_dim, unsigned char *mem_ptr, int theta_dim = 0) -> int;
+  auto mem_assign(const Dimensions &dimensions, unsigned char *mem_ptr) -> int;
 
   // For knowing how much memory to pre-allocate.
   static constexpr auto num_bytes(int state_dim, int control_dim,
@@ -279,16 +407,32 @@ struct Workspace {
         num_stages * (state_dim + control_dim) + state_dim + theta_dim;
     const int y_dim = (c_dim + state_dim) * (num_stages + 1);
     const int z_dim = g_dim * (num_stages + 1);
-    return ModelCallbackOutput::num_bytes(state_dim, control_dim, num_stages,
-                                          c_dim, g_dim, theta_dim) +
-           ModelCallbackInput::num_bytes(num_stages) +
-           (x_dim + y_dim + z_dim) * sizeof(double) +
-           LQR::Workspace::num_bytes(state_dim, control_dim, num_stages) +
-           LQR::Output::num_bytes(num_stages) +
-           RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
-                                         c_dim, g_dim, theta_dim) +
-           sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
+    const int metadata_size = (9 * num_stages + 7) * sizeof(int);
+    int total = ModelCallbackOutput::num_bytes(state_dim, control_dim,
+                                               num_stages, c_dim, g_dim,
+                                               theta_dim) +
+                ModelCallbackInput::num_bytes(num_stages) +
+                (x_dim + y_dim + z_dim) * sizeof(double) + metadata_size;
+    total = ((total + alignof(std::max_align_t) - 1) /
+             alignof(std::max_align_t)) *
+            alignof(std::max_align_t);
+    total += LQR::Workspace::num_bytes(state_dim, control_dim, num_stages);
+    total = ((total + alignof(std::max_align_t) - 1) /
+             alignof(std::max_align_t)) *
+            alignof(std::max_align_t);
+    total += LQR::Output::num_bytes(num_stages);
+    total = ((total + alignof(std::max_align_t) - 1) /
+             alignof(std::max_align_t)) *
+            alignof(std::max_align_t);
+    total += RegularizedLQRData::num_bytes(state_dim, control_dim, num_stages,
+                                           c_dim, g_dim, theta_dim);
+    total = ((total + alignof(std::max_align_t) - 1) /
+             alignof(std::max_align_t)) *
+            alignof(std::max_align_t);
+    total += sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
+    return total;
   }
+  static auto num_bytes(const Dimensions &dimensions) -> int;
 
   ModelCallbackOutput model_callback_output;
 
@@ -297,6 +441,20 @@ struct Workspace {
   double *gradient_f;
   double *c;
   double *g;
+  int stagewise_x_dim;
+  int x_dim;
+  int y_dim;
+  int z_dim;
+  int stagewise_kkt_dim;
+  int *state_dims;
+  int *control_dims;
+  int *c_dims;
+  int *g_dims;
+  int *x_state_offsets;
+  int *x_control_offsets;
+  int *y_dyn_offsets;
+  int *y_c_offsets;
+  int *z_offsets;
 
   LQR::Workspace lqr_workspace;
 

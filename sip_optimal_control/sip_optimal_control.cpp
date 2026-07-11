@@ -17,12 +17,12 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       if (mci.new_x) {
         for (int i = 0; i < input.dimensions.num_stages; ++i) {
           workspace.model_callback_input.states[i] = x;
-          x += input.dimensions.state_dim;
+          x += input.dimensions.get_state_dim(i);
           workspace.model_callback_input.controls[i] = x;
-          x += input.dimensions.control_dim;
+          x += input.dimensions.get_control_dim(i);
         }
         workspace.model_callback_input.states[input.dimensions.num_stages] = x;
-        x += input.dimensions.state_dim;
+        x += input.dimensions.get_state_dim(input.dimensions.num_stages);
         workspace.model_callback_input.theta = x;
       }
     }
@@ -32,9 +32,9 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       if (mci.new_y) {
         for (int i = 0; i <= input.dimensions.num_stages; ++i) {
           workspace.model_callback_input.costates[i] = y;
-          y += input.dimensions.state_dim;
+          y += input.dimensions.get_state_dim(i);
           workspace.model_callback_input.equality_constraint_multipliers[i] = y;
-          y += input.dimensions.c_dim;
+          y += input.dimensions.get_c_dim(i);
         }
       }
     }
@@ -45,7 +45,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
         for (int i = 0; i <= input.dimensions.num_stages; ++i) {
           workspace.model_callback_input.inequality_constraint_multipliers[i] =
               z;
-          z += input.dimensions.g_dim;
+          z += input.dimensions.get_g_dim(i);
         }
       }
     }
@@ -57,16 +57,17 @@ auto solve(const Input &input, const ::sip::Settings &settings,
         double *grad_f = workspace.gradient_f;
         for (int i = 0; i < input.dimensions.num_stages; ++i) {
           std::copy_n(workspace.model_callback_output.df_dx[i],
-                      input.dimensions.state_dim, grad_f);
-          grad_f += input.dimensions.state_dim;
+                      input.dimensions.get_state_dim(i), grad_f);
+          grad_f += input.dimensions.get_state_dim(i);
           std::copy_n(workspace.model_callback_output.df_du[i],
-                      input.dimensions.control_dim, grad_f);
-          grad_f += input.dimensions.control_dim;
+                      input.dimensions.get_control_dim(i), grad_f);
+          grad_f += input.dimensions.get_control_dim(i);
         }
         std::copy_n(
             workspace.model_callback_output.df_dx[input.dimensions.num_stages],
-            input.dimensions.state_dim, grad_f);
-        grad_f += input.dimensions.state_dim;
+            input.dimensions.get_state_dim(input.dimensions.num_stages),
+            grad_f);
+        grad_f += input.dimensions.get_state_dim(input.dimensions.num_stages);
         std::copy_n(workspace.model_callback_output.df_dtheta,
                     input.dimensions.theta_dim, grad_f);
       }
@@ -75,11 +76,11 @@ auto solve(const Input &input, const ::sip::Settings &settings,
         double *c = workspace.c;
         for (int i = 0; i <= input.dimensions.num_stages; ++i) {
           std::copy_n(workspace.model_callback_output.dyn_res[i],
-                      input.dimensions.state_dim, c);
-          c += input.dimensions.state_dim;
+                      input.dimensions.get_state_dim(i), c);
+          c += input.dimensions.get_state_dim(i);
           std::copy_n(workspace.model_callback_output.c[i],
-                      input.dimensions.c_dim, c);
-          c += input.dimensions.c_dim;
+                      input.dimensions.get_c_dim(i), c);
+          c += input.dimensions.get_c_dim(i);
         }
       }
 
@@ -87,8 +88,8 @@ auto solve(const Input &input, const ::sip::Settings &settings,
         double *g = workspace.g;
         for (int i = 0; i <= input.dimensions.num_stages; ++i) {
           std::copy_n(workspace.model_callback_output.g[i],
-                      input.dimensions.g_dim, g);
-          g += input.dimensions.g_dim;
+                      input.dimensions.get_g_dim(i), g);
+          g += input.dimensions.get_g_dim(i);
         }
       }
     }
