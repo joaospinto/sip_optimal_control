@@ -15,6 +15,8 @@
 namespace sip::optimal_control {
 namespace {
 
+constexpr auto kSettings = ::sip::Settings{};
+
 auto consecutive_integers(const int size, const int first) -> std::vector<int> {
   std::vector<int> values(size);
   std::iota(values.begin(), values.end(), first);
@@ -69,7 +71,7 @@ struct NewtonKKTProblem {
         },
         w(z_dim), r2(y_dim), r3(z_dim), rhs(kkt_dim), solution(kkt_dim),
         kkt_times_solution(kkt_dim) {
-    workspace.reserve(input.dimensions, input.topology);
+    workspace.reserve(input.dimensions, input.topology, kSettings);
 
     auto rng = std::mt19937(0);
     auto normal = std::normal_distribution<double>(0.0, 1.0);

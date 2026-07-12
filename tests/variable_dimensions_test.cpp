@@ -12,6 +12,15 @@
 namespace sip::optimal_control {
 namespace {
 
+constexpr auto filter_settings() -> ::sip::Settings {
+  auto settings = ::sip::Settings{};
+  settings.max_iterations = 4;
+  settings.line_search.use_filter_line_search = true;
+  return settings;
+}
+
+constexpr auto kSettings = filter_settings();
+
 void fill_sequence(double *data, const int size, const double scale) {
   for (int i = 0; i < size; ++i) {
     data[i] = scale * static_cast<double>(i + 1);
@@ -37,7 +46,6 @@ struct ChainTopology {
 struct InvalidDagTopology {
   std::array<int, 2> parent = {0, 1};
   std::array<int, 2> child = {2, 2};
-
 };
 
 TEST(InputValidation, AcceptsChainAndTreeRejectsNonTreeDag) {
@@ -46,10 +54,8 @@ TEST(InputValidation, AcceptsChainAndTreeRejectsNonTreeDag) {
   const std::array<int, 3> c_dims = {0, 1, 0};
   const std::array<int, 3> g_dims = {1, 0, 2};
 
-  const Dimensions dimensions{2, state_dims.data(),
-                              control_dims.data(),
-                              c_dims.data(),
-                              g_dims.data()};
+  const Dimensions dimensions{2, state_dims.data(), control_dims.data(),
+                              c_dims.data(), g_dims.data()};
   ChainTopology chain_topology;
 
   const Topology chain{2, 0, chain_topology.parent.data(),
@@ -85,11 +91,10 @@ TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
   };
   Workspace workspace;
   std::vector<unsigned char> workspace_memory(
-      Workspace::num_bytes(input.dimensions, input.topology));
-  EXPECT_EQ(
-      workspace.mem_assign(input.dimensions, input.topology,
-                           workspace_memory.data()),
-      static_cast<int>(workspace_memory.size()));
+      Workspace::num_bytes(input.dimensions, input.topology, kSettings));
+  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology, kSettings,
+                                 workspace_memory.data()),
+            static_cast<int>(workspace_memory.size()));
   auto &mco = workspace.model_callback_output;
 
   for (int node = 0; node < 3; ++node) {
@@ -119,7 +124,8 @@ TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
     std::fill_n(mco.df_du[edge], m, 0.0);
     fill_sequence(mco.ddyn_dx[edge], n_child * n_parent, 0.04);
     fill_sequence(mco.ddyn_du[edge], n_child * m, -0.05);
-    fill_sequence(mco.ddyn_dtheta[edge], n_child * input.dimensions.theta_dim, 0.0);
+    fill_sequence(mco.ddyn_dtheta[edge], n_child * input.dimensions.theta_dim,
+                  0.0);
     fill_sequence(mco.dc_du[edge], c * m, 0.06);
     fill_sequence(mco.dg_du[edge], g * m, -0.04);
     fill_sequence(mco.d2L_dxdu[edge], n_parent * m, 0.02);
@@ -186,11 +192,10 @@ TEST(CallbackProvider, SolvesVariableDimensionBranchedKKTSystem) {
   };
   Workspace workspace;
   std::vector<unsigned char> workspace_memory(
-      Workspace::num_bytes(input.dimensions, input.topology));
-  EXPECT_EQ(
-      workspace.mem_assign(input.dimensions, input.topology,
-                           workspace_memory.data()),
-      static_cast<int>(workspace_memory.size()));
+      Workspace::num_bytes(input.dimensions, input.topology, kSettings));
+  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology, kSettings,
+                                 workspace_memory.data()),
+            static_cast<int>(workspace_memory.size()));
   auto &mco = workspace.model_callback_output;
 
   for (int node = 0; node < 3; ++node) {
@@ -210,7 +215,8 @@ TEST(CallbackProvider, SolvesVariableDimensionBranchedKKTSystem) {
     std::fill_n(mco.df_du[edge], m, 0.0);
     fill_sequence(mco.ddyn_dx[edge], n_child * n_parent, 0.04 + 0.01 * edge);
     fill_sequence(mco.ddyn_du[edge], n_child * m, -0.05 - 0.01 * edge);
-    fill_sequence(mco.ddyn_dtheta[edge], n_child * input.dimensions.theta_dim, 0.0);
+    fill_sequence(mco.ddyn_dtheta[edge], n_child * input.dimensions.theta_dim,
+                  0.0);
     fill_sequence(mco.d2L_dxdu[edge], n_parent * m, 0.02 + 0.01 * edge);
     fill_spd(mco.d2L_du2[edge], m, 2.5 + 0.1 * edge);
     fill_sequence(mco.d2L_dudtheta[edge], m * input.dimensions.theta_dim, 0.0);
@@ -275,11 +281,10 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithSchurVariables) {
   };
   Workspace workspace;
   std::vector<unsigned char> workspace_memory(
-      Workspace::num_bytes(input.dimensions, input.topology));
-  EXPECT_EQ(
-      workspace.mem_assign(input.dimensions, input.topology,
-                           workspace_memory.data()),
-      static_cast<int>(workspace_memory.size()));
+      Workspace::num_bytes(input.dimensions, input.topology, kSettings));
+  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology, kSettings,
+                                 workspace_memory.data()),
+            static_cast<int>(workspace_memory.size()));
   auto &mco = workspace.model_callback_output;
   const int p = input.dimensions.theta_dim;
 

@@ -253,17 +253,18 @@ struct Workspace {
   };
 
   // To dynamically allocate the required memory.
-  void reserve(const Dimensions &dimensions, const Topology &topology);
+  void reserve(const Dimensions &dimensions, const Topology &topology,
+               const sip::Settings &settings);
   void free(const Topology &topology);
 
   // For using pre-allocated (possibly statically allocated) memory.
   auto mem_assign(const Dimensions &dimensions, const Topology &topology,
-                  unsigned char *mem_ptr) -> int;
+                  const sip::Settings &settings, unsigned char *mem_ptr) -> int;
 
   // For knowing how much memory to pre-allocate.
   static constexpr auto num_bytes(int state_dim, int control_dim, int num_edges,
-                                  int c_dim, int g_dim, int theta_dim = 0)
-      -> int {
+                                  int c_dim, int g_dim, int theta_dim,
+                                  const sip::Settings &settings) -> int {
     const int x_dim =
         num_edges * (state_dim + control_dim) + state_dim + theta_dim;
     const int y_dim = (c_dim + state_dim) * (num_edges + 1);
@@ -290,11 +291,11 @@ struct Workspace {
     total =
         ((total + alignof(std::max_align_t) - 1) / alignof(std::max_align_t)) *
         alignof(std::max_align_t);
-    total += sip::Workspace::num_bytes(x_dim, z_dim, y_dim);
+    total += sip::Workspace::num_bytes(x_dim, z_dim, y_dim, settings);
     return total;
   }
-  static auto num_bytes(const Dimensions &dimensions, const Topology &topology)
-      -> int;
+  static auto num_bytes(const Dimensions &dimensions, const Topology &topology,
+                        const sip::Settings &settings) -> int;
 
   ModelCallbackOutput model_callback_output;
 
