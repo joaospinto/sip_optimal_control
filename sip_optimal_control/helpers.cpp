@@ -773,8 +773,6 @@ void CallbackProvider::solve(const double *b, double *sol) {
   double *sol_y = sol + workspace_.x_dim;
   double *sol_z = sol_y + workspace_.y_dim;
 
-  auto stagewise_rhs = Eigen::Map<Eigen::VectorXd>(
-      theta_data.theta_stagewise_rhs, stagewise_kkt_dim);
   std::copy_n(b, workspace_.stagewise_x_dim,
               theta_data.theta_stagewise_rhs);
   std::copy_n(b_y, workspace_.y_dim,
@@ -802,11 +800,12 @@ void CallbackProvider::solve(const double *b, double *sol) {
       theta_rhs);
   S_theta_factor.transpose().template triangularView<Eigen::Upper>()
       .solveInPlace(theta_rhs);
-  std::copy_n(theta_data.theta_rhs, p, sol_theta);
 
-  stagewise_rhs.noalias() -= J_theta * theta_rhs;
-
-  solve_stagewise_kkt(theta_data.theta_stagewise_rhs, sol);
+  const auto K_inv_J_theta = Eigen::Map<const Eigen::MatrixXd>(
+      theta_data.theta_solution, stagewise_kkt_dim, p);
+  auto stagewise_solution =
+      Eigen::Map<Eigen::VectorXd>(sol, stagewise_kkt_dim);
+  stagewise_solution.noalias() -= K_inv_J_theta * theta_rhs;
 
   const int stagewise_x_dim = workspace_.stagewise_x_dim;
   std::copy_backward(sol + stagewise_x_dim + workspace_.y_dim,
