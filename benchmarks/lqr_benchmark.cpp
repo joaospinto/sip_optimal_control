@@ -46,18 +46,18 @@ struct LQRProblem {
 
   LQRProblem(int n, int m, int T)
       : state_dim(n), control_dim(m), num_edges(T), state_dims(T + 1, n),
-        control_dims(T, m), edge_parents(T), edge_children(T), Q(T + 1), M(T), R(T), A(T),
-        B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1), M_ptr(T),
-        R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T), c_ptr(T + 1),
-        delta_ptr(T + 1) {
+        control_dims(T, m), edge_parents(T), edge_children(T), Q(T + 1), M(T),
+        R(T), A(T), B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1),
+        M_ptr(T), R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T),
+        c_ptr(T + 1), delta_ptr(T + 1) {
     for (int edge = 0; edge < T; ++edge) {
       edge_parents[edge] = edge;
       edge_children[edge] = edge + 1;
     }
-    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
-                                  nullptr, nullptr};
-    input_topology = Topology{num_edges, 0, edge_parents.data(),
-                              edge_children.data()};
+    input_dimensions =
+        Dimensions{0, state_dims.data(), control_dims.data(), nullptr, nullptr};
+    input_topology =
+        Topology{num_edges, 0, edge_parents.data(), edge_children.data()};
     auto rng = std::mt19937(0);
     auto normal = std::normal_distribution<double>(0.0, 1.0);
     auto uniform = std::uniform_real_distribution<double>(0.0, 1.0);
@@ -304,8 +304,8 @@ struct VariableLQRProblem {
     }
 
     refresh_pointers();
-    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
-                                  nullptr, nullptr};
+    input_dimensions =
+        Dimensions{0, state_dims.data(), control_dims.data(), nullptr, nullptr};
     input_topology = topology.input();
   }
 

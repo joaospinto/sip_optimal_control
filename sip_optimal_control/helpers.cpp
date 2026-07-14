@@ -93,8 +93,7 @@ void add_weighted_control_jacobian_products(
 }
 
 void add_weighted_state_jacobian_product(
-    Eigen::Ref<Eigen::MatrixXd> Q,
-    const Eigen::Ref<const Eigen::MatrixXd> &J_x,
+    Eigen::Ref<Eigen::MatrixXd> Q, const Eigen::Ref<const Eigen::MatrixXd> &J_x,
     const Eigen::Ref<const Eigen::VectorXd> &weights) {
   for (int constraint = 0; constraint < weights.size(); ++constraint) {
     const double weight = weights(constraint);
@@ -154,8 +153,8 @@ void CallbackProvider::form_theta_jacobian() {
 
   const int p = dim.theta_dim;
   const int stagewise_kkt_dim = workspace_.stagewise_kkt_dim;
-  auto J_theta =
-      Eigen::Map<Eigen::MatrixXd>(lqr_data.theta_jacobian, stagewise_kkt_dim, p);
+  auto J_theta = Eigen::Map<Eigen::MatrixXd>(lqr_data.theta_jacobian,
+                                             stagewise_kkt_dim, p);
   J_theta.setZero();
 
   for (int node = 0; node < input_.topology.num_nodes(); ++node) {
@@ -171,14 +170,15 @@ void CallbackProvider::form_theta_jacobian() {
 
   for (int node = 0; node < input_.topology.num_nodes(); ++node) {
     const int c = c_dim(input_, node);
-    J_theta.block(workspace_.stagewise_x_dim + y_c_offset(workspace_, node), 0, c, p) =
+    J_theta.block(workspace_.stagewise_x_dim + y_c_offset(workspace_, node), 0,
+                  c, p) =
         Eigen::Map<const Eigen::MatrixXd>(mco.dc_dtheta[node], c, p);
   }
   for (int edge = 0; edge < input_.topology.num_edges; ++edge) {
     const int child = workspace_.lqr_workspace.edge_children[edge];
     const int n_child = state_dim(input_, child);
-    J_theta.block(workspace_.stagewise_x_dim + y_dyn_offset(workspace_, child), 0,
-                  n_child, p) =
+    J_theta.block(workspace_.stagewise_x_dim + y_dyn_offset(workspace_, child),
+                  0, n_child, p) =
         Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_dtheta[edge], n_child, p);
   }
 
@@ -224,19 +224,19 @@ bool CallbackProvider::factor(const double *w, const double r1,
     const int c_i = input_.dimensions.get_c_dim(node);
     const int g_i = input_.dimensions.get_g_dim(node);
 
-    const auto Q_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.d2L_dx2[node], n_i, n_i);
+    const auto Q_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.d2L_dx2[node], n_i, n_i);
 
-    const auto jac_x_c_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.dc_dx[node], c_i, n_i);
+    const auto jac_x_c_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dc_dx[node], c_i, n_i);
 
-    const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.dg_dx[node], g_i, n_i);
+    const auto jac_x_g_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dg_dx[node], g_i, n_i);
 
     auto mod_w_inv_i =
         Eigen::Map<Eigen::VectorXd>(lqr_data.mod_w_inv[node], g_i);
-    const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
-        lqr_data.c_r2_inv[node], c_i);
+    const auto c_r2_inv_i =
+        Eigen::Map<const Eigen::VectorXd>(lqr_data.c_r2_inv[node], c_i);
 
     for (int j = 0; j < g_i; ++j) {
       const double w_reg = w[w_offset] + r3[w_offset];
@@ -247,8 +247,7 @@ bool CallbackProvider::factor(const double *w, const double r1,
       mod_w_inv_i(j) = 1.0 / w_reg;
     }
 
-    auto Q_i_mod =
-        Eigen::Map<Eigen::MatrixXd>(lqr_data.Q_mod[node], n_i, n_i);
+    auto Q_i_mod = Eigen::Map<Eigen::MatrixXd>(lqr_data.Q_mod[node], n_i, n_i);
 
     Q_i_mod.template triangularView<Eigen::Lower>() =
         Q_i.template triangularView<Eigen::Lower>();
@@ -266,28 +265,28 @@ bool CallbackProvider::factor(const double *w, const double r1,
     const int c_i = input_.dimensions.get_c_dim(parent);
     const int g_i = input_.dimensions.get_g_dim(parent);
 
-    const auto M_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.d2L_dxdu[i], n_i, m_i);
+    const auto M_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.d2L_dxdu[i], n_i, m_i);
 
-    const auto R_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.d2L_du2[i], m_i, m_i);
+    const auto R_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.d2L_du2[i], m_i, m_i);
 
-    const auto jac_x_c_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.dc_dx[parent], c_i, n_i);
+    const auto jac_x_c_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dc_dx[parent], c_i, n_i);
 
-    const auto jac_u_c_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.dc_du[i], c_i, m_i);
+    const auto jac_u_c_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dc_du[i], c_i, m_i);
 
-    const auto jac_x_g_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.dg_dx[parent], g_i, n_i);
+    const auto jac_x_g_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dg_dx[parent], g_i, n_i);
 
-    const auto jac_u_g_i = Eigen::Map<const Eigen::MatrixXd>(
-        mco.dg_du[i], g_i, m_i);
+    const auto jac_u_g_i =
+        Eigen::Map<const Eigen::MatrixXd>(mco.dg_du[i], g_i, m_i);
 
     const auto mod_w_inv_i =
         Eigen::Map<const Eigen::VectorXd>(lqr_data.mod_w_inv[parent], g_i);
-    const auto c_r2_inv_i = Eigen::Map<const Eigen::VectorXd>(
-        lqr_data.c_r2_inv[parent], c_i);
+    const auto c_r2_inv_i =
+        Eigen::Map<const Eigen::VectorXd>(lqr_data.c_r2_inv[parent], c_i);
 
     auto M_i_mod = Eigen::Map<Eigen::MatrixXd>(lqr_data.M_mod[i], n_i, m_i);
 
@@ -328,15 +327,15 @@ bool CallbackProvider::factor(const double *w, const double r1,
 
   const auto J_theta = Eigen::Map<const Eigen::MatrixXd>(
       theta_data.theta_jacobian, stagewise_kkt_dim, p);
-  auto K_inv_J_theta = Eigen::Map<Eigen::MatrixXd>(
-      theta_data.theta_solution, stagewise_kkt_dim, p);
+  auto K_inv_J_theta = Eigen::Map<Eigen::MatrixXd>(theta_data.theta_solution,
+                                                   stagewise_kkt_dim, p);
 
   solve_stagewise_kkt_matrix(J_theta.data(), K_inv_J_theta.data(), p);
 
   const auto H_theta_theta = Eigen::Map<const Eigen::MatrixXd>(
-      mco.d2L_dtheta2, input_.dimensions.theta_dim, input_.dimensions.theta_dim);
-  auto S_theta =
-      Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur, p, p);
+      mco.d2L_dtheta2, input_.dimensions.theta_dim,
+      input_.dimensions.theta_dim);
+  auto S_theta = Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur, p, p);
   S_theta.noalias() = H_theta_theta;
   S_theta.diagonal().array() += r1;
   S_theta.noalias() -= J_theta.transpose() * K_inv_J_theta;
@@ -370,12 +369,11 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
       const int g = g_dim(input_, node);
       const auto b_x = matrix_block(b, x_state_offset(workspace_, node), n,
                                     num_rhs, stagewise_kkt_dim);
-      const auto b_y_c = matrix_block(
-          b, x_dim + y_c_offset(workspace_, node), c, num_rhs,
-          stagewise_kkt_dim);
-      const auto b_z = matrix_block(
-          b, x_dim + y_dim + z_offset(workspace_, node), g, num_rhs,
-          stagewise_kkt_dim);
+      const auto b_y_c = matrix_block(b, x_dim + y_c_offset(workspace_, node),
+                                      c, num_rhs, stagewise_kkt_dim);
+      const auto b_z =
+          matrix_block(b, x_dim + y_dim + z_offset(workspace_, node), g,
+                       num_rhs, stagewise_kkt_dim);
       const auto jac_x_c =
           Eigen::Map<const Eigen::MatrixXd>(mco.dc_dx[node], c, n);
       const auto jac_x_g =
@@ -384,14 +382,13 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
           Eigen::Map<const Eigen::VectorXd>(lqr_data.c_r2_inv[node], c);
       const auto mod_w_inv =
           Eigen::Map<const Eigen::VectorXd>(lqr_data.mod_w_inv[node], g);
-      auto v_node = matrix_block(sol, x_dim + y_dyn_offset(workspace_, node),
-                                 n, num_rhs, stagewise_kkt_dim);
-      auto weighted_c =
-          matrix_block(sol, x_dim + y_c_offset(workspace_, node), c, num_rhs,
-                       stagewise_kkt_dim);
-      auto weighted_g = matrix_block(
-          sol, x_dim + y_dim + z_offset(workspace_, node), g, num_rhs,
-          stagewise_kkt_dim);
+      auto v_node = matrix_block(sol, x_dim + y_dyn_offset(workspace_, node), n,
+                                 num_rhs, stagewise_kkt_dim);
+      auto weighted_c = matrix_block(sol, x_dim + y_c_offset(workspace_, node),
+                                     c, num_rhs, stagewise_kkt_dim);
+      auto weighted_g =
+          matrix_block(sol, x_dim + y_dim + z_offset(workspace_, node), g,
+                       num_rhs, stagewise_kkt_dim);
 
       v_node.noalias() = -b_x;
       set_row_scaled(weighted_c, c_r2_inv, b_y_c);
@@ -414,9 +411,9 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
       const auto weighted_c =
           matrix_block(sol, x_dim + y_c_offset(workspace_, parent), c, num_rhs,
                        stagewise_kkt_dim);
-      const auto weighted_g = matrix_block(
-          sol, x_dim + y_dim + z_offset(workspace_, parent), g, num_rhs,
-          stagewise_kkt_dim);
+      const auto weighted_g =
+          matrix_block(sol, x_dim + y_dim + z_offset(workspace_, parent), g,
+                       num_rhs, stagewise_kkt_dim);
       auto h_edge = matrix_block(sol, x_control_offset(workspace_, edge), m,
                                  num_rhs, stagewise_kkt_dim);
 
@@ -425,13 +422,15 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
       h_edge.noalias() -= jac_u_g.transpose() * weighted_g;
     }
 
-    auto f_scratch = matrix_block(lqr_data.stagewise_scratch, 0,
-                                  dim.max_state_dim(input_.topology.num_nodes()), num_rhs,
-                                  dim.max_state_dim(input_.topology.num_nodes()));
+    auto f_scratch =
+        matrix_block(lqr_data.stagewise_scratch, 0,
+                     dim.max_state_dim(input_.topology.num_nodes()), num_rhs,
+                     dim.max_state_dim(input_.topology.num_nodes()));
     auto g_scratch =
         matrix_block(lqr_data.stagewise_scratch,
-                     dim.max_state_dim(input_.topology.num_nodes()) * num_rhs, dim.max_state_dim(input_.topology.num_nodes()),
-                     num_rhs, dim.max_state_dim(input_.topology.num_nodes()));
+                     dim.max_state_dim(input_.topology.num_nodes()) * num_rhs,
+                     dim.max_state_dim(input_.topology.num_nodes()), num_rhs,
+                     dim.max_state_dim(input_.topology.num_nodes()));
 
     for (int order = 0; order < input_.topology.num_nodes(); ++order) {
       const int node = workspace_.lqr_workspace.postorder_nodes[order];
@@ -447,15 +446,12 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
         const int child_dim = state_dim(input_, child);
         const int m = control_dim(input_, edge);
 
-        const auto A_edge =
-            Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_dx[edge], child_dim,
-                                              node_dim);
+        const auto A_edge = Eigen::Map<const Eigen::MatrixXd>(
+            mco.ddyn_dx[edge], child_dim, node_dim);
         const auto B_edge =
-            Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_du[edge], child_dim,
-                                              m);
-        const auto delta_child =
-            Eigen::Map<const Eigen::VectorXd>(lqr_data.dyn_r2[child],
-                                              child_dim);
+            Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_du[edge], child_dim, m);
+        const auto delta_child = Eigen::Map<const Eigen::VectorXd>(
+            lqr_data.dyn_r2[child], child_dim);
         const auto W_edge = Eigen::Map<const Eigen::MatrixXd>(
             workspace_.lqr_workspace.W[edge], child_dim, child_dim);
         const auto G_edge_factor = Eigen::Map<const Eigen::MatrixXd>(
@@ -468,8 +464,8 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
         const auto v_child =
             matrix_block(sol, x_dim + y_dyn_offset(workspace_, child),
                          child_dim, num_rhs, stagewise_kkt_dim);
-        auto h_edge = matrix_block(sol, x_control_offset(workspace_, edge),
-                                   m, num_rhs, stagewise_kkt_dim);
+        auto h_edge = matrix_block(sol, x_control_offset(workspace_, edge), m,
+                                   num_rhs, stagewise_kkt_dim);
         auto f_child = f_scratch.block(0, 0, child_dim, num_rhs);
         auto g_child = g_scratch.block(0, 0, child_dim, num_rhs);
 
@@ -525,9 +521,8 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
     for (int order = 0; order < input_.topology.num_nodes(); ++order) {
       const int node = workspace_.lqr_workspace.preorder_nodes[order];
       const int node_dim = state_dim(input_, node);
-      const auto x_node =
-          matrix_block(sol, x_state_offset(workspace_, node), node_dim,
-                       num_rhs, stagewise_kkt_dim);
+      const auto x_node = matrix_block(sol, x_state_offset(workspace_, node),
+                                       node_dim, num_rhs, stagewise_kkt_dim);
 
       for (int child_index = workspace_.lqr_workspace.child_offsets[node];
            child_index < workspace_.lqr_workspace.child_offsets[node + 1];
@@ -537,12 +532,10 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
         const int child_dim = state_dim(input_, child);
         const int m = control_dim(input_, edge);
 
-        const auto A_edge =
-            Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_dx[edge], child_dim,
-                                              node_dim);
+        const auto A_edge = Eigen::Map<const Eigen::MatrixXd>(
+            mco.ddyn_dx[edge], child_dim, node_dim);
         const auto B_edge =
-            Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_du[edge], child_dim,
-                                              m);
+            Eigen::Map<const Eigen::MatrixXd>(mco.ddyn_du[edge], child_dim, m);
         const auto K_edge = Eigen::Map<const Eigen::MatrixXd>(
             workspace_.lqr_workspace.K[edge], m, node_dim);
         const auto V_child = Eigen::Map<const Eigen::MatrixXd>(
@@ -553,17 +546,15 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
             workspace_.lqr_workspace.sqrt_delta[child], child_dim);
         const auto sqrt_delta_child_inv = Eigen::Map<const Eigen::VectorXd>(
             workspace_.lqr_workspace.sqrt_delta_inv[child], child_dim);
-        const auto delta_child =
-            Eigen::Map<const Eigen::VectorXd>(lqr_data.dyn_r2[child],
-                                              child_dim);
+        const auto delta_child = Eigen::Map<const Eigen::VectorXd>(
+            lqr_data.dyn_r2[child], child_dim);
         const auto b_y_dyn_child =
             matrix_block(b, x_dim + y_dyn_offset(workspace_, child), child_dim,
                          num_rhs, stagewise_kkt_dim);
-        auto u_edge = matrix_block(sol, x_control_offset(workspace_, edge),
-                                   m, num_rhs, stagewise_kkt_dim);
-        auto x_child =
-            matrix_block(sol, x_state_offset(workspace_, child), child_dim,
-                         num_rhs, stagewise_kkt_dim);
+        auto u_edge = matrix_block(sol, x_control_offset(workspace_, edge), m,
+                                   num_rhs, stagewise_kkt_dim);
+        auto x_child = matrix_block(sol, x_state_offset(workspace_, child),
+                                    child_dim, num_rhs, stagewise_kkt_dim);
         auto y_child =
             matrix_block(sol, x_dim + y_dyn_offset(workspace_, child),
                          child_dim, num_rhs, stagewise_kkt_dim);
@@ -589,15 +580,13 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
       const int n = state_dim(input_, node);
       const int c = c_dim(input_, node);
       const int g = g_dim(input_, node);
-      const auto x_node =
-          matrix_block(sol, x_state_offset(workspace_, node), n, num_rhs,
-                       stagewise_kkt_dim);
-      const auto b_y_c = matrix_block(
-          b, x_dim + y_c_offset(workspace_, node), c, num_rhs,
-          stagewise_kkt_dim);
-      const auto b_z = matrix_block(
-          b, x_dim + y_dim + z_offset(workspace_, node), g, num_rhs,
-          stagewise_kkt_dim);
+      const auto x_node = matrix_block(sol, x_state_offset(workspace_, node), n,
+                                       num_rhs, stagewise_kkt_dim);
+      const auto b_y_c = matrix_block(b, x_dim + y_c_offset(workspace_, node),
+                                      c, num_rhs, stagewise_kkt_dim);
+      const auto b_z =
+          matrix_block(b, x_dim + y_dim + z_offset(workspace_, node), g,
+                       num_rhs, stagewise_kkt_dim);
       const auto jac_x_c =
           Eigen::Map<const Eigen::MatrixXd>(mco.dc_dx[node], c, n);
       const auto jac_x_g =
@@ -645,8 +634,8 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
     const int g = g_dim(input_, node);
     const auto b_x = Eigen::Map<const Eigen::VectorXd>(
         b + x_state_offset(workspace_, node), n);
-    const auto b_y_c =
-        Eigen::Map<const Eigen::VectorXd>(b + x_dim + y_c_offset(workspace_, node), c);
+    const auto b_y_c = Eigen::Map<const Eigen::VectorXd>(
+        b + x_dim + y_c_offset(workspace_, node), c);
     const auto b_z = Eigen::Map<const Eigen::VectorXd>(
         b + x_dim + y_dim + z_offset(workspace_, node), g);
     const auto jac_x_c =
@@ -701,7 +690,8 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
   lqr_input_.c = lqr_data.c_mod;
   for (int node = 0; node < input_.topology.num_nodes(); ++node) {
     workspace_.lqr_output.x[node] = sol + x_state_offset(workspace_, node);
-    workspace_.lqr_output.y[node] = sol + x_dim + y_dyn_offset(workspace_, node);
+    workspace_.lqr_output.y[node] =
+        sol + x_dim + y_dyn_offset(workspace_, node);
   }
   for (int edge = 0; edge < input_.topology.num_edges; ++edge) {
     workspace_.lqr_output.u[edge] = sol + x_control_offset(workspace_, edge);
@@ -713,10 +703,10 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
     const int n = state_dim(input_, node);
     const int c = c_dim(input_, node);
     const int g = g_dim(input_, node);
-    const auto x_node =
-        Eigen::Map<const Eigen::VectorXd>(sol + x_state_offset(workspace_, node), n);
-    const auto b_y_c =
-        Eigen::Map<const Eigen::VectorXd>(b + x_dim + y_c_offset(workspace_, node), c);
+    const auto x_node = Eigen::Map<const Eigen::VectorXd>(
+        sol + x_state_offset(workspace_, node), n);
+    const auto b_y_c = Eigen::Map<const Eigen::VectorXd>(
+        b + x_dim + y_c_offset(workspace_, node), c);
     const auto b_z = Eigen::Map<const Eigen::VectorXd>(
         b + x_dim + y_dim + z_offset(workspace_, node), g);
     const auto jac_x_c =
@@ -727,8 +717,8 @@ void CallbackProvider::solve_stagewise_kkt_matrix(const double *b, double *sol,
         Eigen::Map<const Eigen::VectorXd>(lqr_data.c_r2_inv[node], c);
     const auto mod_w_inv =
         Eigen::Map<const Eigen::VectorXd>(lqr_data.mod_w_inv[node], g);
-    auto y_c =
-        Eigen::Map<Eigen::VectorXd>(sol + x_dim + y_c_offset(workspace_, node), c);
+    auto y_c = Eigen::Map<Eigen::VectorXd>(
+        sol + x_dim + y_c_offset(workspace_, node), c);
     auto z = Eigen::Map<Eigen::VectorXd>(
         sol + x_dim + y_dim + z_offset(workspace_, node), g);
 
@@ -773,14 +763,11 @@ void CallbackProvider::solve(const double *b, double *sol) {
   double *sol_y = sol + workspace_.x_dim;
   double *sol_z = sol_y + workspace_.y_dim;
 
-  std::copy_n(b, workspace_.stagewise_x_dim,
-              theta_data.theta_stagewise_rhs);
+  std::copy_n(b, workspace_.stagewise_x_dim, theta_data.theta_stagewise_rhs);
   std::copy_n(b_y, workspace_.y_dim,
-              theta_data.theta_stagewise_rhs +
-                  workspace_.stagewise_x_dim);
+              theta_data.theta_stagewise_rhs + workspace_.stagewise_x_dim);
   std::copy_n(b_z, workspace_.z_dim,
-              theta_data.theta_stagewise_rhs +
-                  workspace_.stagewise_x_dim +
+              theta_data.theta_stagewise_rhs + workspace_.stagewise_x_dim +
                   workspace_.y_dim);
 
   solve_stagewise_kkt(theta_data.theta_stagewise_rhs, sol);
@@ -789,8 +776,7 @@ void CallbackProvider::solve(const double *b, double *sol) {
       theta_data.theta_jacobian, stagewise_kkt_dim, p);
   const auto K_inv_b =
       Eigen::Map<const Eigen::VectorXd>(sol, stagewise_kkt_dim);
-  auto theta_rhs =
-      Eigen::Map<Eigen::VectorXd>(theta_data.theta_rhs, p);
+  auto theta_rhs = Eigen::Map<Eigen::VectorXd>(theta_data.theta_rhs, p);
   theta_rhs.noalias() = Eigen::Map<const Eigen::VectorXd>(b_theta, p);
   theta_rhs.noalias() -= J_theta.transpose() * K_inv_b;
 
@@ -798,19 +784,18 @@ void CallbackProvider::solve(const double *b, double *sol) {
       Eigen::Map<const Eigen::MatrixXd>(theta_data.theta_schur_factor, p, p);
   S_theta_factor.template triangularView<Eigen::Lower>().solveInPlace(
       theta_rhs);
-  S_theta_factor.transpose().template triangularView<Eigen::Upper>()
+  S_theta_factor.transpose()
+      .template triangularView<Eigen::Upper>()
       .solveInPlace(theta_rhs);
 
   const auto K_inv_J_theta = Eigen::Map<const Eigen::MatrixXd>(
       theta_data.theta_solution, stagewise_kkt_dim, p);
-  auto stagewise_solution =
-      Eigen::Map<Eigen::VectorXd>(sol, stagewise_kkt_dim);
+  auto stagewise_solution = Eigen::Map<Eigen::VectorXd>(sol, stagewise_kkt_dim);
   stagewise_solution.noalias() -= K_inv_J_theta * theta_rhs;
 
   const int stagewise_x_dim = workspace_.stagewise_x_dim;
   std::copy_backward(sol + stagewise_x_dim + workspace_.y_dim,
-                     sol + stagewise_kkt_dim,
-                     sol_z + workspace_.z_dim);
+                     sol + stagewise_kkt_dim, sol_z + workspace_.z_dim);
   std::copy_backward(sol + stagewise_x_dim,
                      sol + stagewise_x_dim + workspace_.y_dim,
                      sol_y + workspace_.y_dim);
@@ -852,8 +837,8 @@ void CallbackProvider::add_Hx_to_y(const double *x, double *y) {
     const int n = state_dim(input_, node);
     const auto Q = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.d2L_dx2[node], n, n);
-    const auto x_node =
-        Eigen::Map<const Eigen::VectorXd>(x + x_state_offset(workspace_, node), n);
+    const auto x_node = Eigen::Map<const Eigen::VectorXd>(
+        x + x_state_offset(workspace_, node), n);
     auto y_node =
         Eigen::Map<Eigen::VectorXd>(y + x_state_offset(workspace_, node), n);
     y_node.noalias() += Q * x_node;
@@ -869,10 +854,10 @@ void CallbackProvider::add_Hx_to_y(const double *x, double *y) {
         workspace_.model_callback_output.d2L_du2[edge], m, m);
     const auto x_parent = Eigen::Map<const Eigen::VectorXd>(
         x + x_state_offset(workspace_, parent), n_parent);
-    const auto u_edge =
-        Eigen::Map<const Eigen::VectorXd>(x + x_control_offset(workspace_, edge), m);
-    auto y_parent =
-        Eigen::Map<Eigen::VectorXd>(y + x_state_offset(workspace_, parent), n_parent);
+    const auto u_edge = Eigen::Map<const Eigen::VectorXd>(
+        x + x_control_offset(workspace_, edge), m);
+    auto y_parent = Eigen::Map<Eigen::VectorXd>(
+        y + x_state_offset(workspace_, parent), n_parent);
     auto y_u =
         Eigen::Map<Eigen::VectorXd>(y + x_control_offset(workspace_, edge), m);
     y_parent.noalias() += M * u_edge;
@@ -894,11 +879,10 @@ void CallbackProvider::add_Hx_to_y(const double *x, double *y) {
     const int n = state_dim(input_, node);
     const auto H_x_theta = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.d2L_dxdtheta[node], n, p);
-    const auto x_node =
-        Eigen::Map<const Eigen::VectorXd>(x_begin + x_state_offset(workspace_, node),
-                                          n);
-    auto y_node =
-        Eigen::Map<Eigen::VectorXd>(y_begin + x_state_offset(workspace_, node), n);
+    const auto x_node = Eigen::Map<const Eigen::VectorXd>(
+        x_begin + x_state_offset(workspace_, node), n);
+    auto y_node = Eigen::Map<Eigen::VectorXd>(
+        y_begin + x_state_offset(workspace_, node), n);
     y_node.noalias() += H_x_theta * theta;
     y_theta.noalias() += H_x_theta.transpose() * x_node;
   }
@@ -906,11 +890,10 @@ void CallbackProvider::add_Hx_to_y(const double *x, double *y) {
     const int m = control_dim(input_, edge);
     const auto H_u_theta = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.d2L_dudtheta[edge], m, p);
-    const auto u_edge =
-        Eigen::Map<const Eigen::VectorXd>(x_begin + x_control_offset(workspace_, edge),
-                                          m);
-    auto y_u =
-        Eigen::Map<Eigen::VectorXd>(y_begin + x_control_offset(workspace_, edge), m);
+    const auto u_edge = Eigen::Map<const Eigen::VectorXd>(
+        x_begin + x_control_offset(workspace_, edge), m);
+    auto y_u = Eigen::Map<Eigen::VectorXd>(
+        y_begin + x_control_offset(workspace_, edge), m);
     y_u.noalias() += H_u_theta * theta;
     y_theta.noalias() += H_u_theta.transpose() * u_edge;
   }
@@ -935,8 +918,8 @@ void CallbackProvider::add_Cx_to_y(const double *x, double *y) {
   for (int node = 0; node < input_.topology.num_nodes(); ++node) {
     const int n = state_dim(input_, node);
     const int c = c_dim(input_, node);
-    const auto x_node =
-        Eigen::Map<const Eigen::VectorXd>(x + x_state_offset(workspace_, node), n);
+    const auto x_node = Eigen::Map<const Eigen::VectorXd>(
+        x + x_state_offset(workspace_, node), n);
     const auto jac_x_c = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dc_dx[node], c, n);
     auto y_c_node =
@@ -959,15 +942,14 @@ void CallbackProvider::add_Cx_to_y(const double *x, double *y) {
         workspace_.model_callback_output.dc_du[edge], c_parent, m);
     const auto x_parent = Eigen::Map<const Eigen::VectorXd>(
         x + x_state_offset(workspace_, parent), n_parent);
-    const auto x_child =
-        Eigen::Map<const Eigen::VectorXd>(x + x_state_offset(workspace_, child),
-                                          n_child);
-    const auto u_edge =
-        Eigen::Map<const Eigen::VectorXd>(x + x_control_offset(workspace_, edge), m);
-    auto y_dyn_child =
-        Eigen::Map<Eigen::VectorXd>(y + y_dyn_offset(workspace_, child), n_child);
-    auto y_c_parent =
-        Eigen::Map<Eigen::VectorXd>(y + y_c_offset(workspace_, parent), c_parent);
+    const auto x_child = Eigen::Map<const Eigen::VectorXd>(
+        x + x_state_offset(workspace_, child), n_child);
+    const auto u_edge = Eigen::Map<const Eigen::VectorXd>(
+        x + x_control_offset(workspace_, edge), m);
+    auto y_dyn_child = Eigen::Map<Eigen::VectorXd>(
+        y + y_dyn_offset(workspace_, child), n_child);
+    auto y_c_parent = Eigen::Map<Eigen::VectorXd>(
+        y + y_c_offset(workspace_, parent), c_parent);
     y_dyn_child.noalias() += A * x_parent;
     y_dyn_child.noalias() += B * u_edge;
     y_dyn_child.noalias() -= x_child;
@@ -979,8 +961,8 @@ void CallbackProvider::add_Cx_to_y(const double *x, double *y) {
   }
 
   const int p = dim.theta_dim;
-  const auto theta =
-      Eigen::Map<const Eigen::VectorXd>(x_begin + workspace_.stagewise_x_dim, p);
+  const auto theta = Eigen::Map<const Eigen::VectorXd>(
+      x_begin + workspace_.stagewise_x_dim, p);
   for (int node = 0; node < input_.topology.num_nodes(); ++node) {
     const int c = c_dim(input_, node);
     auto y_c_node =
@@ -992,9 +974,8 @@ void CallbackProvider::add_Cx_to_y(const double *x, double *y) {
   for (int edge = 0; edge < input_.topology.num_edges; ++edge) {
     const int child = workspace_.lqr_workspace.edge_children[edge];
     const int n_child = state_dim(input_, child);
-    auto y_dyn_child =
-        Eigen::Map<Eigen::VectorXd>(y_begin + y_dyn_offset(workspace_, child),
-                                    n_child);
+    auto y_dyn_child = Eigen::Map<Eigen::VectorXd>(
+        y_begin + y_dyn_offset(workspace_, child), n_child);
     const auto dyn_theta = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.ddyn_dtheta[edge], n_child, p);
     y_dyn_child.noalias() += dyn_theta * theta;
@@ -1033,22 +1014,20 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
     const int n_child = state_dim(input_, child);
     const int m = control_dim(input_, edge);
     const int c_parent = c_dim(input_, parent);
-    const auto dyn_child =
-        Eigen::Map<const Eigen::VectorXd>(x + y_dyn_offset(workspace_, child),
-                                          n_child);
-    const auto c_vec =
-        Eigen::Map<const Eigen::VectorXd>(x + y_c_offset(workspace_, parent),
-                                          c_parent);
+    const auto dyn_child = Eigen::Map<const Eigen::VectorXd>(
+        x + y_dyn_offset(workspace_, child), n_child);
+    const auto c_vec = Eigen::Map<const Eigen::VectorXd>(
+        x + y_c_offset(workspace_, parent), c_parent);
     const auto A = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.ddyn_dx[edge], n_child, n_parent);
     const auto B = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.ddyn_du[edge], n_child, m);
     const auto jac_u_c = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dc_du[edge], c_parent, m);
-    auto y_parent =
-        Eigen::Map<Eigen::VectorXd>(y + x_state_offset(workspace_, parent), n_parent);
-    auto y_child =
-        Eigen::Map<Eigen::VectorXd>(y + x_state_offset(workspace_, child), n_child);
+    auto y_parent = Eigen::Map<Eigen::VectorXd>(
+        y + x_state_offset(workspace_, parent), n_parent);
+    auto y_child = Eigen::Map<Eigen::VectorXd>(
+        y + x_state_offset(workspace_, child), n_child);
     auto y_u =
         Eigen::Map<Eigen::VectorXd>(y + x_control_offset(workspace_, edge), m);
     y_parent.noalias() += A.transpose() * dyn_child;
@@ -1066,8 +1045,8 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
       Eigen::Map<Eigen::VectorXd>(y_begin + workspace_.stagewise_x_dim, p);
   for (int node = 0; node < input_.topology.num_nodes(); ++node) {
     const int c = c_dim(input_, node);
-    const auto c_vec =
-        Eigen::Map<const Eigen::VectorXd>(x_begin + y_c_offset(workspace_, node), c);
+    const auto c_vec = Eigen::Map<const Eigen::VectorXd>(
+        x_begin + y_c_offset(workspace_, node), c);
     const auto c_theta = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dc_dtheta[node], c, p);
     y_theta.noalias() += c_theta.transpose() * c_vec;
@@ -1075,9 +1054,8 @@ void CallbackProvider::add_CTx_to_y(const double *x, double *y) {
   for (int edge = 0; edge < input_.topology.num_edges; ++edge) {
     const int child = workspace_.lqr_workspace.edge_children[edge];
     const int n_child = state_dim(input_, child);
-    const auto dyn_child =
-        Eigen::Map<const Eigen::VectorXd>(x_begin + y_dyn_offset(workspace_, child),
-                                          n_child);
+    const auto dyn_child = Eigen::Map<const Eigen::VectorXd>(
+        x_begin + y_dyn_offset(workspace_, child), n_child);
     const auto dyn_theta = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.ddyn_dtheta[edge], n_child, p);
     y_theta.noalias() += dyn_theta.transpose() * dyn_child;
@@ -1094,9 +1072,10 @@ void CallbackProvider::add_Gx_to_y(const double *x, double *y) {
     const int g = g_dim(input_, node);
     const auto jac_x_g = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dg_dx[node], g, n);
-    const auto x_node =
-        Eigen::Map<const Eigen::VectorXd>(x + x_state_offset(workspace_, node), n);
-    auto y_node = Eigen::Map<Eigen::VectorXd>(y + z_offset(workspace_, node), g);
+    const auto x_node = Eigen::Map<const Eigen::VectorXd>(
+        x + x_state_offset(workspace_, node), n);
+    auto y_node =
+        Eigen::Map<Eigen::VectorXd>(y + z_offset(workspace_, node), g);
     y_node.noalias() += jac_x_g * x_node;
   }
   for (int edge = 0; edge < input_.topology.num_edges; ++edge) {
@@ -1105,8 +1084,8 @@ void CallbackProvider::add_Gx_to_y(const double *x, double *y) {
     const int g = g_dim(input_, parent);
     const auto jac_u_g = Eigen::Map<const Eigen::MatrixXd>(
         workspace_.model_callback_output.dg_du[edge], g, m);
-    const auto u_edge =
-        Eigen::Map<const Eigen::VectorXd>(x + x_control_offset(workspace_, edge), m);
+    const auto u_edge = Eigen::Map<const Eigen::VectorXd>(
+        x + x_control_offset(workspace_, edge), m);
     auto y_parent =
         Eigen::Map<Eigen::VectorXd>(y + z_offset(workspace_, parent), g);
     y_parent.noalias() += jac_u_g * u_edge;
@@ -1117,8 +1096,8 @@ void CallbackProvider::add_Gx_to_y(const double *x, double *y) {
   }
 
   const int p = dim.theta_dim;
-  const auto theta =
-      Eigen::Map<const Eigen::VectorXd>(x_begin + workspace_.stagewise_x_dim, p);
+  const auto theta = Eigen::Map<const Eigen::VectorXd>(
+      x_begin + workspace_.stagewise_x_dim, p);
   double *y_stage = y_begin;
   for (int i = 0; i < input_.topology.num_nodes(); ++i) {
     const int g_i = g_dim(input_, i);

@@ -44,18 +44,18 @@ struct LQRProblem {
 
   LQRProblem(int n, int m, int T)
       : state_dim(n), control_dim(m), num_edges(T), state_dims(T + 1, n),
-        control_dims(T, m), edge_parents(T), edge_children(T), Q(T + 1), M(T), R(T), A(T),
-        B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1), M_ptr(T),
-        R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T), c_ptr(T + 1),
-        delta_ptr(T + 1) {
+        control_dims(T, m), edge_parents(T), edge_children(T), Q(T + 1), M(T),
+        R(T), A(T), B(T), q(T + 1), r(T), c(T + 1), delta(T + 1), Q_ptr(T + 1),
+        M_ptr(T), R_ptr(T), A_ptr(T), B_ptr(T), q_ptr(T + 1), r_ptr(T),
+        c_ptr(T + 1), delta_ptr(T + 1) {
     for (int edge = 0; edge < T; ++edge) {
       edge_parents[edge] = edge;
       edge_children[edge] = edge + 1;
     }
-    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
-                                  nullptr, nullptr};
-    input_topology = Topology{num_edges, 0, edge_parents.data(),
-                              edge_children.data()};
+    input_dimensions =
+        Dimensions{0, state_dims.data(), control_dims.data(), nullptr, nullptr};
+    input_topology =
+        Topology{num_edges, 0, edge_parents.data(), edge_children.data()};
     for (int i = 0; i <= T; ++i) {
       Q[i] = Eigen::MatrixXd::Identity(n, n);
       q[i] = Eigen::VectorXd::Zero(n);
@@ -329,8 +329,8 @@ struct BranchLQRProblem {
     delta[2] = (Eigen::Vector2d() << 1.0, 0.6).finished();
 
     refresh_pointers();
-    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
-                                  nullptr, nullptr};
+    input_dimensions =
+        Dimensions{0, state_dims.data(), control_dims.data(), nullptr, nullptr};
     input_topology = Topology{num_edges, 0, topology.parent, topology.child};
   }
 
@@ -446,7 +446,6 @@ TEST(LQRTopology, ReusesCompiledTopologyAcrossFactorAndSolveCalls) {
   lqr.solve(output);
   lqr.solve(output);
 
-
   workspace.free(problem.num_edges);
 }
 
@@ -527,8 +526,8 @@ struct VariableDimensionBranchProblem {
     delta[2] = (Eigen::Vector3d() << 0.7, 1.0, 1.2).finished();
 
     refresh_pointers();
-    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
-                                  nullptr, nullptr};
+    input_dimensions =
+        Dimensions{0, state_dims.data(), control_dims.data(), nullptr, nullptr};
     input_topology = Topology{num_edges, 0, topology.parent, topology.child};
   }
 
@@ -662,7 +661,6 @@ TEST(LQRSolve, SolvesVariableDimensionBranchingTreeProblem) {
 struct FiveNodeTopology {
   std::array<int, 4> parent = {0, 0, 1, 1};
   std::array<int, 4> child = {1, 2, 3, 4};
-
 };
 
 struct FiveNodeVariableTreeProblem {
@@ -757,10 +755,10 @@ struct FiveNodeVariableTreeProblem {
     }
 
     refresh_pointers();
-    input_dimensions = Dimensions{0, state_dims.data(), control_dims.data(),
-                                  nullptr, nullptr};
-    input_topology = Topology{num_edges, 0, topology.parent.data(),
-                              topology.child.data()};
+    input_dimensions =
+        Dimensions{0, state_dims.data(), control_dims.data(), nullptr, nullptr};
+    input_topology =
+        Topology{num_edges, 0, topology.parent.data(), topology.child.data()};
   }
 
   void refresh_pointers() {

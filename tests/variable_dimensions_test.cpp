@@ -74,16 +74,16 @@ TEST(InputValidation, AcceptsChainAndTreeRejectsNonTreeDag) {
             InputValidationStatus::INVALID_TOPOLOGY);
 
   const std::array<int, 3> zero_root_state_dims = {0, 1, 3};
-  const Dimensions zero_root_dimensions{
-      2, zero_root_state_dims.data(), control_dims.data(), c_dims.data(),
-      g_dims.data()};
+  const Dimensions zero_root_dimensions{2, zero_root_state_dims.data(),
+                                        control_dims.data(), c_dims.data(),
+                                        g_dims.data()};
   EXPECT_EQ(validate_input(zero_root_dimensions, tree),
             InputValidationStatus::SUCCESS);
 
   const std::array<int, 3> negative_state_dims = {-1, 1, 3};
-  const Dimensions negative_dimensions{
-      2, negative_state_dims.data(), control_dims.data(), c_dims.data(),
-      g_dims.data()};
+  const Dimensions negative_dimensions{2, negative_state_dims.data(),
+                                       control_dims.data(), c_dims.data(),
+                                       g_dims.data()};
   EXPECT_EQ(validate_input(negative_dimensions, tree),
             InputValidationStatus::INVALID_DIMENSIONS);
 }
