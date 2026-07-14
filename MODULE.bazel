@@ -8,7 +8,7 @@ module(
 bazel_dep(name = "sip")
 git_override(
     module_name = "sip",
-    commit = "b73753faa48068808b9f8ebba146192884b711fc",
+    commit = "ef57f441b42ad8f9b75eca342430b42761680331",
     remote = "https://github.com/joaospinto/sip.git",
 )
 
