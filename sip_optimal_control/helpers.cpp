@@ -78,15 +78,29 @@ void add_weighted_control_jacobian_products(
 
     for (int col = 0; col < M.cols(); ++col) {
       const double weighted_j_u_col = weight * J_u(constraint, col);
+      if (weighted_j_u_col == 0.0) {
+        continue;
+      }
       for (int row = 0; row < M.rows(); ++row) {
-        M(row, col) += J_x(constraint, row) * weighted_j_u_col;
+        const double j_x = J_x(constraint, row);
+        if (j_x == 0.0) {
+          continue;
+        }
+        M(row, col) += j_x * weighted_j_u_col;
       }
     }
 
     for (int col = 0; col < R.cols(); ++col) {
       const double weighted_j_u_col = weight * J_u(constraint, col);
+      if (weighted_j_u_col == 0.0) {
+        continue;
+      }
       for (int row = col; row < R.rows(); ++row) {
-        R(row, col) += weighted_j_u_col * J_u(constraint, row);
+        const double j_u = J_u(constraint, row);
+        if (j_u == 0.0) {
+          continue;
+        }
+        R(row, col) += weighted_j_u_col * j_u;
       }
     }
   }
@@ -99,8 +113,15 @@ void add_weighted_state_jacobian_product(
     const double weight = weights(constraint);
     for (int col = 0; col < Q.cols(); ++col) {
       const double weighted_j_x_col = weight * J_x(constraint, col);
+      if (weighted_j_x_col == 0.0) {
+        continue;
+      }
       for (int row = col; row < Q.rows(); ++row) {
-        Q(row, col) += weighted_j_x_col * J_x(constraint, row);
+        const double j_x = J_x(constraint, row);
+        if (j_x == 0.0) {
+          continue;
+        }
+        Q(row, col) += weighted_j_x_col * j_x;
       }
     }
   }
@@ -114,7 +135,11 @@ void subtract_weighted_jacobian_rhs(
   for (int constraint = 0; constraint < weights.size(); ++constraint) {
     const double weighted_rhs = weights(constraint) * rhs(constraint);
     for (int col = 0; col < jacobian.cols(); ++col) {
-      result(col) -= jacobian(constraint, col) * weighted_rhs;
+      const double jacobian_entry = jacobian(constraint, col);
+      if (jacobian_entry == 0.0) {
+        continue;
+      }
+      result(col) -= jacobian_entry * weighted_rhs;
     }
   }
 }
