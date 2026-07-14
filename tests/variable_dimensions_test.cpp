@@ -72,6 +72,20 @@ TEST(InputValidation, AcceptsChainAndTreeRejectsNonTreeDag) {
                      dag_topology.child.data()};
   EXPECT_EQ(validate_input(dimensions, dag),
             InputValidationStatus::INVALID_TOPOLOGY);
+
+  const std::array<int, 3> zero_root_state_dims = {0, 1, 3};
+  const Dimensions zero_root_dimensions{
+      2, zero_root_state_dims.data(), control_dims.data(), c_dims.data(),
+      g_dims.data()};
+  EXPECT_EQ(validate_input(zero_root_dimensions, tree),
+            InputValidationStatus::SUCCESS);
+
+  const std::array<int, 3> negative_state_dims = {-1, 1, 3};
+  const Dimensions negative_dimensions{
+      2, negative_state_dims.data(), control_dims.data(), c_dims.data(),
+      g_dims.data()};
+  EXPECT_EQ(validate_input(negative_dimensions, tree),
+            InputValidationStatus::INVALID_DIMENSIONS);
 }
 
 TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
@@ -176,8 +190,8 @@ TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
   EXPECT_LT(std::sqrt(squared_error), 1e-9);
 }
 
-TEST(CallbackProvider, SolvesVariableDimensionBranchedKKTSystem) {
-  const std::array<int, 3> state_dims = {2, 1, 3};
+TEST(CallbackProvider, SolvesBranchedKKTSystemWithZeroDimensionalRoot) {
+  const std::array<int, 3> state_dims = {0, 1, 3};
   const std::array<int, 2> control_dims = {1, 2};
   const std::array<int, 3> c_dims = {0, 0, 0};
   const std::array<int, 3> g_dims = {0, 0, 0};

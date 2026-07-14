@@ -66,7 +66,7 @@ auto validate_input(const Dimensions &dimensions, const Topology &topology)
   }
 
   for (int node = 0; node < num_nodes; ++node) {
-    if (dimensions.get_state_dim(node) <= 0 || dimensions.get_c_dim(node) < 0 ||
+    if (dimensions.get_state_dim(node) < 0 || dimensions.get_c_dim(node) < 0 ||
         dimensions.get_g_dim(node) < 0) {
       return InputValidationStatus::INVALID_DIMENSIONS;
     }
