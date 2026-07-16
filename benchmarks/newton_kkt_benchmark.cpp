@@ -34,7 +34,7 @@ struct NewtonKKTProblem {
   int y_dim;
   int z_dim;
   int kkt_dim;
-  double r1;
+  std::vector<double> r1;
 
   std::vector<int> state_dims;
   std::vector<int> control_dims;
@@ -57,7 +57,7 @@ struct NewtonKKTProblem {
       : state_dim(n), control_dim(m), num_edges(T), c_dim(std::max(1, n / 2)),
         g_dim(std::max(1, 2 * m)), theta_dim(p), x_dim(T * (n + m) + n + p),
         y_dim((c_dim + n) * (T + 1)), z_dim(g_dim * (T + 1)),
-        kkt_dim(x_dim + y_dim + z_dim), r1(1e-8), state_dims(T + 1, n),
+        kkt_dim(x_dim + y_dim + z_dim), r1(x_dim, 1e-8), state_dims(T + 1, n),
         control_dims(T, m), c_dims(T + 1, c_dim), g_dims(T + 1, g_dim),
         edge_parents(consecutive_integers(T, 0)),
         edge_children(consecutive_integers(T, 1)),
@@ -71,7 +71,8 @@ struct NewtonKKTProblem {
         },
         w(z_dim), r2(y_dim), r3(z_dim), rhs(kkt_dim), solution(kkt_dim),
         kkt_times_solution(kkt_dim) {
-    workspace.reserve(input.dimensions, input.topology, kSettings);
+    workspace.reserve(input.dimensions, input.topology, input.num_bound_sides(),
+                      kSettings);
 
     auto rng = std::mt19937(0);
     auto normal = std::normal_distribution<double>(0.0, 1.0);
@@ -90,7 +91,7 @@ struct NewtonKKTProblem {
   auto operator=(const NewtonKKTProblem &) -> NewtonKKTProblem & = delete;
 
   bool factor() {
-    return callback_provider->factor(w.data(), r1, r2.data(), r3.data());
+    return callback_provider->factor(w.data(), r1.data(), r2.data(), r3.data());
   }
 
   void solve() { callback_provider->solve(rhs.data(), solution.data()); }
@@ -98,7 +99,7 @@ struct NewtonKKTProblem {
   auto residual_norm() -> double {
     std::fill(kkt_times_solution.begin(), kkt_times_solution.end(), 0.0);
     callback_provider->add_Kx_to_y(
-        w.data(), r1, r2.data(), r3.data(), solution.data(),
+        w.data(), r1.data(), r2.data(), r3.data(), solution.data(),
         solution.data() + x_dim, solution.data() + x_dim + y_dim,
         kkt_times_solution.data(), kkt_times_solution.data() + x_dim,
         kkt_times_solution.data() + x_dim + y_dim);

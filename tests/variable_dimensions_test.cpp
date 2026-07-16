@@ -104,9 +104,10 @@ TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
       .timeout_callback = []() { return false; },
   };
   Workspace workspace;
-  std::vector<unsigned char> workspace_memory(
-      Workspace::num_bytes(input.dimensions, input.topology, kSettings));
-  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology, kSettings,
+  std::vector<unsigned char> workspace_memory(Workspace::num_bytes(
+      input.dimensions, input.topology, input.num_bound_sides(), kSettings));
+  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology,
+                                 input.num_bound_sides(), kSettings,
                                  workspace_memory.data()),
             static_cast<int>(workspace_memory.size()));
   auto &mco = workspace.model_callback_output;
@@ -157,7 +158,13 @@ TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
   std::vector<double> w(z_dim, 1.3);
   std::vector<double> r2(y_dim, 0.9);
   std::vector<double> r3(z_dim, 0.4);
-  ASSERT_TRUE(callback_provider.factor(w.data(), 0.2, r2.data(), r3.data()));
+  std::vector<double> r1(x_dim);
+  fill_sequence(r1.data(), x_dim, 0.03);
+  for (double &value : r1) {
+    value += 0.2;
+  }
+  ASSERT_TRUE(
+      callback_provider.factor(w.data(), r1.data(), r2.data(), r3.data()));
 
   std::vector<double> rhs(kkt_dim);
   fill_sequence(rhs.data(), kkt_dim, 0.01);
@@ -169,7 +176,7 @@ TEST(CallbackProvider, SolvesVariableDimensionKKTSystem) {
   std::vector<double> product_y(y_dim, 0.0);
   std::vector<double> product_z(z_dim, 0.0);
   callback_provider.add_Kx_to_y(
-      w.data(), 0.2, r2.data(), r3.data(), solution.data(),
+      w.data(), r1.data(), r2.data(), r3.data(), solution.data(),
       solution.data() + x_dim, solution.data() + x_dim + y_dim,
       product_x.data(), product_y.data(), product_z.data());
 
@@ -205,9 +212,10 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithZeroDimensionalRoot) {
       .timeout_callback = []() { return false; },
   };
   Workspace workspace;
-  std::vector<unsigned char> workspace_memory(
-      Workspace::num_bytes(input.dimensions, input.topology, kSettings));
-  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology, kSettings,
+  std::vector<unsigned char> workspace_memory(Workspace::num_bytes(
+      input.dimensions, input.topology, input.num_bound_sides(), kSettings));
+  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology,
+                                 input.num_bound_sides(), kSettings,
                                  workspace_memory.data()),
             static_cast<int>(workspace_memory.size()));
   auto &mco = workspace.model_callback_output;
@@ -246,7 +254,13 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithZeroDimensionalRoot) {
   std::vector<double> w(z_dim, 1.3);
   std::vector<double> r2(y_dim, 0.9);
   std::vector<double> r3(z_dim, 0.4);
-  ASSERT_TRUE(callback_provider.factor(w.data(), 0.2, r2.data(), r3.data()));
+  std::vector<double> r1(x_dim);
+  fill_sequence(r1.data(), x_dim, 0.03);
+  for (double &value : r1) {
+    value += 0.2;
+  }
+  ASSERT_TRUE(
+      callback_provider.factor(w.data(), r1.data(), r2.data(), r3.data()));
 
   std::vector<double> rhs(kkt_dim);
   fill_sequence(rhs.data(), kkt_dim, 0.01);
@@ -258,7 +272,7 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithZeroDimensionalRoot) {
   std::vector<double> product_y(y_dim, 0.0);
   std::vector<double> product_z(z_dim, 0.0);
   callback_provider.add_Kx_to_y(
-      w.data(), 0.2, r2.data(), r3.data(), solution.data(),
+      w.data(), r1.data(), r2.data(), r3.data(), solution.data(),
       solution.data() + x_dim, solution.data() + x_dim + y_dim,
       product_x.data(), product_y.data(), product_z.data());
 
@@ -294,9 +308,10 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithSchurVariables) {
       .timeout_callback = []() { return false; },
   };
   Workspace workspace;
-  std::vector<unsigned char> workspace_memory(
-      Workspace::num_bytes(input.dimensions, input.topology, kSettings));
-  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology, kSettings,
+  std::vector<unsigned char> workspace_memory(Workspace::num_bytes(
+      input.dimensions, input.topology, input.num_bound_sides(), kSettings));
+  EXPECT_EQ(workspace.mem_assign(input.dimensions, input.topology,
+                                 input.num_bound_sides(), kSettings,
                                  workspace_memory.data()),
             static_cast<int>(workspace_memory.size()));
   auto &mco = workspace.model_callback_output;
@@ -352,7 +367,13 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithSchurVariables) {
   std::vector<double> w(z_dim, 1.3);
   std::vector<double> r2(y_dim, 0.9);
   std::vector<double> r3(z_dim, 0.4);
-  ASSERT_TRUE(callback_provider.factor(w.data(), 0.2, r2.data(), r3.data()));
+  std::vector<double> r1(x_dim);
+  fill_sequence(r1.data(), x_dim, 0.03);
+  for (double &value : r1) {
+    value += 0.2;
+  }
+  ASSERT_TRUE(
+      callback_provider.factor(w.data(), r1.data(), r2.data(), r3.data()));
 
   std::vector<double> rhs(kkt_dim);
   fill_sequence(rhs.data(), kkt_dim, 0.01);
@@ -364,7 +385,7 @@ TEST(CallbackProvider, SolvesBranchedKKTSystemWithSchurVariables) {
   std::vector<double> product_y(y_dim, 0.0);
   std::vector<double> product_z(z_dim, 0.0);
   callback_provider.add_Kx_to_y(
-      w.data(), 0.2, r2.data(), r3.data(), solution.data(),
+      w.data(), r1.data(), r2.data(), r3.data(), solution.data(),
       solution.data() + x_dim, solution.data() + x_dim + y_dim,
       product_x.data(), product_y.data(), product_z.data());
 

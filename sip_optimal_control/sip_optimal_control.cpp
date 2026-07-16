@@ -94,7 +94,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
     }
   };
 
-  const auto factor = [&callback_provider](const double *w, const double r1,
+  const auto factor = [&callback_provider](const double *w, const double *r1,
                                            const double *r2,
                                            const double *r3) -> bool {
     return callback_provider.factor(w, r1, r2, r3);
@@ -105,7 +105,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
   };
 
   const auto add_Kx_to_y =
-      [&callback_provider](const double *w, const double r1, const double *r2,
+      [&callback_provider](const double *w, const double *r1, const double *r2,
                            const double *r3, const double *x_x,
                            const double *x_y, const double *x_z, double *y_x,
                            double *y_y, double *y_z) -> void {
@@ -164,6 +164,8 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       .get_g = std::cref(get_g),
       .model_callback = std::cref(model_callback),
       .timeout_callback = std::cref(input.timeout_callback),
+      .lower_bounds = input.lower_bounds,
+      .upper_bounds = input.upper_bounds,
       .dimensions =
           {
               .x_dim = input.dimensions.get_x_dim(input.topology.num_edges),

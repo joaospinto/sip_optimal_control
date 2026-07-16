@@ -215,7 +215,7 @@ void CallbackProvider::form_theta_jacobian() {
   }
 }
 
-bool CallbackProvider::factor(const double *w, const double r1,
+bool CallbackProvider::factor(const double *w, const double *r1,
                               const double *r2, const double *r3) {
   if (!input_is_valid_) {
     return false;
@@ -276,7 +276,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
 
     Q_i_mod.template triangularView<Eigen::Lower>() =
         Q_i.template triangularView<Eigen::Lower>();
-    Q_i_mod.diagonal().array() += r1;
+    Q_i_mod.diagonal() += Eigen::Map<const Eigen::VectorXd>(
+        r1 + x_state_offset(workspace_, node), n_i);
 
     add_weighted_state_jacobian_product(Q_i_mod, jac_x_c_i, c_r2_inv_i);
     add_weighted_state_jacobian_product(Q_i_mod, jac_x_g_i, mod_w_inv_i);
@@ -321,7 +322,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
 
     R_i_mod.template triangularView<Eigen::Lower>() =
         R_i.template triangularView<Eigen::Lower>();
-    R_i_mod.diagonal().array() += r1;
+    R_i_mod.diagonal() += Eigen::Map<const Eigen::VectorXd>(
+        r1 + x_control_offset(workspace_, i), m_i);
 
     add_weighted_control_jacobian_products(M_i_mod, R_i_mod, jac_x_c_i,
                                            jac_u_c_i, c_r2_inv_i);
@@ -362,7 +364,8 @@ bool CallbackProvider::factor(const double *w, const double r1,
       input_.dimensions.theta_dim);
   auto S_theta = Eigen::Map<Eigen::MatrixXd>(theta_data.theta_schur, p, p);
   S_theta.noalias() = H_theta_theta;
-  S_theta.diagonal().array() += r1;
+  S_theta.diagonal() +=
+      Eigen::Map<const Eigen::VectorXd>(r1 + workspace_.stagewise_x_dim, p);
   S_theta.noalias() -= J_theta.transpose() * K_inv_J_theta;
 
   auto S_theta_factor =
@@ -827,7 +830,7 @@ void CallbackProvider::solve(const double *b, double *sol) {
   std::copy_n(theta_data.theta_rhs, p, sol_theta);
 }
 
-void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
+void CallbackProvider::add_Kx_to_y(const double *w, const double *r1,
                                    const double *r2, const double *r3,
                                    const double *x_x, const double *x_y,
                                    const double *x_z, double *y_x, double *y_y,
@@ -843,7 +846,7 @@ void CallbackProvider::add_Kx_to_y(const double *w, const double r1,
   const int z_dim = workspace_.z_dim;
 
   for (int i = 0; i < x_dim; ++i) {
-    y_x[i] += r1 * x_x[i];
+    y_x[i] += r1[i] * x_x[i];
   }
   for (int i = 0; i < y_dim; ++i) {
     y_y[i] -= r2[i] * x_y[i];

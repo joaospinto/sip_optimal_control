@@ -659,6 +659,11 @@ auto Workspace::RegularizedLQRData::mem_assign(const Dimensions &dimensions,
   return cum_size;
 }
 
+auto Input::num_bound_sides() const -> int {
+  return ::sip::num_bound_sides(lower_bounds, upper_bounds,
+                                dimensions.get_x_dim(topology.num_edges));
+}
+
 auto Workspace::RegularizedLQRData::num_bytes(const Dimensions &dimensions,
                                               const int num_edges) -> int {
   const int T = num_edges;
@@ -695,6 +700,7 @@ auto Workspace::RegularizedLQRData::num_bytes(const Dimensions &dimensions,
 }
 
 void Workspace::reserve(const Dimensions &dimensions, const Topology &topology,
+                        const int num_bound_sides,
                         const sip::Settings &settings) {
   const int num_edges = topology.num_edges;
   const int num_nodes = topology.num_nodes();
@@ -716,9 +722,9 @@ void Workspace::reserve(const Dimensions &dimensions, const Topology &topology,
 
   regularized_lqr_data.reserve(dimensions, num_edges);
 
-  sip_workspace.reserve(dimensions.get_x_dim(num_edges),
-                        dimensions.get_z_dim(num_nodes),
-                        dimensions.get_y_dim(num_nodes), settings);
+  sip_workspace.reserve(
+      dimensions.get_x_dim(num_edges), dimensions.get_z_dim(num_nodes),
+      dimensions.get_y_dim(num_nodes), num_bound_sides, settings);
 }
 
 void Workspace::free(const Topology &topology) {
@@ -740,7 +746,7 @@ void Workspace::free(const Topology &topology) {
 }
 
 auto Workspace::mem_assign(const Dimensions &dimensions,
-                           const Topology &topology,
+                           const Topology &topology, const int num_bound_sides,
                            const sip::Settings &settings,
                            unsigned char *mem_ptr) -> int {
   const int num_edges = topology.num_edges;
@@ -788,16 +794,17 @@ auto Workspace::mem_assign(const Dimensions &dimensions,
                                               mem_ptr + cum_size);
 
   cum_size = align_size(cum_size);
-  cum_size += sip_workspace.mem_assign(x_dim, z_dim, y_dim, settings,
-                                       mem_ptr + cum_size);
+  cum_size += sip_workspace.mem_assign(x_dim, z_dim, y_dim, num_bound_sides,
+                                       settings, mem_ptr + cum_size);
 
-  assert(cum_size == Workspace::num_bytes(dimensions, topology, settings));
+  assert(cum_size ==
+         Workspace::num_bytes(dimensions, topology, num_bound_sides, settings));
 
   return cum_size;
 }
 
 auto Workspace::num_bytes(const Dimensions &dimensions,
-                          const Topology &topology,
+                          const Topology &topology, const int num_bound_sides,
                           const sip::Settings &settings) -> int {
   const int num_edges = topology.num_edges;
   const int num_nodes = topology.num_nodes();
@@ -815,7 +822,8 @@ auto Workspace::num_bytes(const Dimensions &dimensions,
   total = align_size(total);
   total += RegularizedLQRData::num_bytes(dimensions, num_edges);
   total = align_size(total);
-  total += sip::Workspace::num_bytes(x_dim, z_dim, y_dim, settings);
+  total +=
+      sip::Workspace::num_bytes(x_dim, z_dim, y_dim, num_bound_sides, settings);
   return total;
 }
 
