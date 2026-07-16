@@ -173,6 +173,8 @@ struct Input {
   // Bounds on variables in SIP's flattened primal ordering.
   const double *lower_bounds;
   const double *upper_bounds;
+  // Multipliers applied to flattened model residuals.
+  ::sip::Input::ResidualScaling residual_scaling;
 
   auto num_bound_sides() const -> int;
 };

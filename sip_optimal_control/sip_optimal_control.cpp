@@ -166,6 +166,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       .timeout_callback = std::cref(input.timeout_callback),
       .lower_bounds = input.lower_bounds,
       .upper_bounds = input.upper_bounds,
+      .residual_scaling = input.residual_scaling,
       .dimensions =
           {
               .x_dim = input.dimensions.get_x_dim(input.topology.num_edges),
