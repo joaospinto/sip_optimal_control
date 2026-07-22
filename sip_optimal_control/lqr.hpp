@@ -22,35 +22,44 @@ struct Topology {
 };
 
 struct Dimensions {
+  // State and node-constraint dimensions are indexed by node ID. Control and
+  // edge-constraint dimensions are indexed by edge ID.
   int theta_dim = 0;
   const int *state_dims = nullptr;
   const int *control_dims = nullptr;
-  const int *c_dims = nullptr;
-  const int *g_dims = nullptr;
+  const int *node_c_dims = nullptr;
+  const int *node_g_dims = nullptr;
+  const int *edge_c_dims = nullptr;
+  const int *edge_g_dims = nullptr;
 
   void reserve(int num_edges);
   void free();
   int mem_assign(int num_edges, unsigned char *mem_ptr);
   static constexpr int num_bytes(int num_edges) {
-    return (3 * (num_edges + 1) + num_edges) * sizeof(int);
+    return (3 * (num_edges + 1) + 3 * num_edges) * sizeof(int);
   }
 
-  void set_uniform(int num_edges, int state_dim, int control_dim, int c_dim,
-                   int g_dim, int theta_dim = 0);
+  void set_uniform(int num_edges, int state_dim, int control_dim,
+                   int node_c_dim, int node_g_dim, int edge_c_dim,
+                   int edge_g_dim, int theta_dim = 0);
 
   int get_schur_dim() const;
   int get_state_dim(int node) const;
   int get_control_dim(int edge) const;
-  int get_c_dim(int node) const;
-  int get_g_dim(int node) const;
+  int get_node_c_dim(int node) const;
+  int get_node_g_dim(int node) const;
+  int get_edge_c_dim(int edge) const;
+  int get_edge_g_dim(int edge) const;
   int max_state_dim(int num_nodes) const;
   int max_control_dim(int num_edges) const;
-  int max_c_dim(int num_nodes) const;
-  int max_g_dim(int num_nodes) const;
+  int max_node_c_dim(int num_nodes) const;
+  int max_node_g_dim(int num_nodes) const;
+  int max_edge_c_dim(int num_edges) const;
+  int max_edge_g_dim(int num_edges) const;
   int get_stagewise_x_dim(int num_edges) const;
   int get_x_dim(int num_edges) const;
-  int get_y_dim(int num_nodes) const;
-  int get_z_dim(int num_nodes) const;
+  int get_y_dim(int num_edges) const;
+  int get_z_dim(int num_edges) const;
   int get_stagewise_kkt_dim(int num_edges) const;
 };
 

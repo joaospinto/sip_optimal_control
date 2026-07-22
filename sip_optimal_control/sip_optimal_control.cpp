@@ -12,83 +12,115 @@ auto solve(const Input &input, const ::sip::Settings &settings,
 
   const auto model_callback =
       [&input, &workspace](const sip::ModelCallbackInput &mci) -> void {
-    {
-      double *x = mci.x;
-      if (mci.new_x) {
-        for (int i = 0; i < input.topology.num_edges; ++i) {
-          workspace.model_callback_input.states[i] = x;
-          x += input.dimensions.get_state_dim(i);
-          workspace.model_callback_input.controls[i] = x;
-          x += input.dimensions.get_control_dim(i);
-        }
-        workspace.model_callback_input.states[input.topology.num_edges] = x;
-        x += input.dimensions.get_state_dim(input.topology.num_edges);
-        workspace.model_callback_input.theta = x;
-      }
+    const double *theta = mci.x + workspace.stagewise_x_dim;
+    workspace.model_callback_input.theta = theta;
+    for (int node = 0; node < input.topology.num_nodes(); ++node) {
+      workspace.model_callback_input.nodes[node] = NodeModelCallbackInput{
+          .node = node,
+          .state = mci.x + workspace.x_state_offsets[node],
+          .equality_constraint_multipliers =
+              mci.y + workspace.y_node_c_offsets[node],
+          .inequality_constraint_multipliers =
+              mci.z + workspace.z_node_offsets[node],
+      };
     }
-
-    {
-      double *y = mci.y;
-      if (mci.new_y) {
-        for (int i = 0; i <= input.topology.num_edges; ++i) {
-          workspace.model_callback_input.costates[i] = y;
-          y += input.dimensions.get_state_dim(i);
-          workspace.model_callback_input.equality_constraint_multipliers[i] = y;
-          y += input.dimensions.get_c_dim(i);
-        }
-      }
+    for (int edge = 0; edge < input.topology.num_edges; ++edge) {
+      const int parent = input.topology.edge_parents[edge];
+      const int child = input.topology.edge_children[edge];
+      workspace.model_callback_input.edges[edge] = EdgeModelCallbackInput{
+          .edge = edge,
+          .parent = parent,
+          .child = child,
+          .parent_state = mci.x + workspace.x_state_offsets[parent],
+          .control = mci.x + workspace.x_control_offsets[edge],
+          .child_state = mci.x + workspace.x_state_offsets[child],
+          .costate = mci.y + workspace.y_dyn_offsets[child],
+          .equality_constraint_multipliers =
+              mci.y + workspace.y_edge_c_offsets[edge],
+          .inequality_constraint_multipliers =
+              mci.z + workspace.z_edge_offsets[edge],
+      };
     }
+    input.model_callback(workspace.model_callback_input,
+                         workspace.model_callback_output);
 
-    {
-      double *z = mci.z;
-      if (mci.new_z) {
-        for (int i = 0; i <= input.topology.num_edges; ++i) {
-          workspace.model_callback_input.inequality_constraint_multipliers[i] =
-              z;
-          z += input.dimensions.get_g_dim(i);
-        }
-      }
+    workspace.f = 0.0;
+    for (int node = 0; node < input.topology.num_nodes(); ++node) {
+      workspace.f += workspace.model_callback_output.nodes[node].f;
     }
-
-    input.model_callback(workspace.model_callback_input);
+    for (int edge = 0; edge < input.topology.num_edges; ++edge) {
+      workspace.f += workspace.model_callback_output.edges[edge].f;
+    }
 
     if (mci.new_x) {
       {
-        double *grad_f = workspace.gradient_f;
-        for (int i = 0; i < input.topology.num_edges; ++i) {
-          std::copy_n(workspace.model_callback_output.df_dx[i],
-                      input.dimensions.get_state_dim(i), grad_f);
-          grad_f += input.dimensions.get_state_dim(i);
-          std::copy_n(workspace.model_callback_output.df_du[i],
-                      input.dimensions.get_control_dim(i), grad_f);
-          grad_f += input.dimensions.get_control_dim(i);
+        std::fill_n(workspace.gradient_f, workspace.x_dim, 0.0);
+        for (int node = 0; node < input.topology.num_nodes(); ++node) {
+          const auto &output = workspace.model_callback_output.nodes[node];
+          const int n = input.dimensions.get_state_dim(node);
+          for (int row = 0; row < n; ++row) {
+            workspace.gradient_f[workspace.x_state_offsets[node] + row] +=
+                output.df_dx[row];
+          }
+          for (int row = 0; row < input.dimensions.theta_dim; ++row) {
+            workspace.gradient_f[workspace.stagewise_x_dim + row] +=
+                output.df_dtheta[row];
+          }
         }
-        std::copy_n(
-            workspace.model_callback_output.df_dx[input.topology.num_edges],
-            input.dimensions.get_state_dim(input.topology.num_edges), grad_f);
-        grad_f += input.dimensions.get_state_dim(input.topology.num_edges);
-        std::copy_n(workspace.model_callback_output.df_dtheta,
-                    input.dimensions.theta_dim, grad_f);
+        for (int edge = 0; edge < input.topology.num_edges; ++edge) {
+          const int parent = input.topology.edge_parents[edge];
+          const auto &output = workspace.model_callback_output.edges[edge];
+          const int n = input.dimensions.get_state_dim(parent);
+          const int m = input.dimensions.get_control_dim(edge);
+          for (int row = 0; row < n; ++row) {
+            workspace.gradient_f[workspace.x_state_offsets[parent] + row] +=
+                output.df_dx[row];
+          }
+          for (int row = 0; row < m; ++row) {
+            workspace.gradient_f[workspace.x_control_offsets[edge] + row] +=
+                output.df_du[row];
+          }
+          for (int row = 0; row < input.dimensions.theta_dim; ++row) {
+            workspace.gradient_f[workspace.stagewise_x_dim + row] +=
+                output.df_dtheta[row];
+          }
+        }
       }
 
       {
-        double *c = workspace.c;
-        for (int i = 0; i <= input.topology.num_edges; ++i) {
-          std::copy_n(workspace.model_callback_output.dyn_res[i],
-                      input.dimensions.get_state_dim(i), c);
-          c += input.dimensions.get_state_dim(i);
-          std::copy_n(workspace.model_callback_output.c[i],
-                      input.dimensions.get_c_dim(i), c);
-          c += input.dimensions.get_c_dim(i);
+        const int root = input.topology.root;
+        const int n_root = input.dimensions.get_state_dim(root);
+        for (int row = 0; row < n_root; ++row) {
+          workspace.c[workspace.y_dyn_offsets[root] + row] =
+              input.initial_state[row] -
+              mci.x[workspace.x_state_offsets[root] + row];
+        }
+        for (int node = 0; node < input.topology.num_nodes(); ++node) {
+          std::copy_n(workspace.model_callback_output.nodes[node].c,
+                      input.dimensions.get_node_c_dim(node),
+                      workspace.c + workspace.y_node_c_offsets[node]);
+        }
+        for (int edge = 0; edge < input.topology.num_edges; ++edge) {
+          const int child = input.topology.edge_children[edge];
+          std::copy_n(workspace.model_callback_output.edges[edge].dyn_res,
+                      input.dimensions.get_state_dim(child),
+                      workspace.c + workspace.y_dyn_offsets[child]);
+          std::copy_n(workspace.model_callback_output.edges[edge].c,
+                      input.dimensions.get_edge_c_dim(edge),
+                      workspace.c + workspace.y_edge_c_offsets[edge]);
         }
       }
 
       {
-        double *g = workspace.g;
-        for (int i = 0; i <= input.topology.num_edges; ++i) {
-          std::copy_n(workspace.model_callback_output.g[i],
-                      input.dimensions.get_g_dim(i), g);
-          g += input.dimensions.get_g_dim(i);
+        for (int node = 0; node < input.topology.num_nodes(); ++node) {
+          std::copy_n(workspace.model_callback_output.nodes[node].g,
+                      input.dimensions.get_node_g_dim(node),
+                      workspace.g + workspace.z_node_offsets[node]);
+        }
+        for (int edge = 0; edge < input.topology.num_edges; ++edge) {
+          std::copy_n(workspace.model_callback_output.edges[edge].g,
+                      input.dimensions.get_edge_g_dim(edge),
+                      workspace.g + workspace.z_edge_offsets[edge]);
         }
       }
     }
@@ -137,9 +169,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
     callback_provider.add_GTx_to_y(x, y);
   };
 
-  const auto get_f = [&workspace]() -> double {
-    return workspace.model_callback_output.f;
-  };
+  const auto get_f = [&workspace]() -> double { return workspace.f; };
 
   const auto get_grad_f = [&workspace]() -> double * {
     return workspace.gradient_f;
@@ -170,8 +200,8 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       .dimensions =
           {
               .x_dim = input.dimensions.get_x_dim(input.topology.num_edges),
-              .s_dim = input.dimensions.get_z_dim(input.topology.num_nodes()),
-              .y_dim = input.dimensions.get_y_dim(input.topology.num_nodes()),
+              .s_dim = input.dimensions.get_z_dim(input.topology.num_edges),
+              .y_dim = input.dimensions.get_y_dim(input.topology.num_edges),
           },
   };
 

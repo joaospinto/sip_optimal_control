@@ -49,33 +49,42 @@ void Topology::set_tree(const int root_node, const int *parents,
 void Dimensions::reserve(const int num_edges) {
   state_dims = new int[num_edges + 1];
   control_dims = new int[num_edges];
-  c_dims = new int[num_edges + 1];
-  g_dims = new int[num_edges + 1];
+  node_c_dims = new int[num_edges + 1];
+  node_g_dims = new int[num_edges + 1];
+  edge_c_dims = new int[num_edges];
+  edge_g_dims = new int[num_edges];
 }
 
 void Dimensions::free() {
   delete[] state_dims;
   delete[] control_dims;
-  delete[] c_dims;
-  delete[] g_dims;
+  delete[] node_c_dims;
+  delete[] node_g_dims;
+  delete[] edge_c_dims;
+  delete[] edge_g_dims;
 }
 
 int Dimensions::mem_assign(const int num_edges, unsigned char *mem_ptr) {
   state_dims = reinterpret_cast<int *>(mem_ptr);
   control_dims = state_dims + num_edges + 1;
-  c_dims = control_dims + num_edges;
-  g_dims = c_dims + num_edges + 1;
+  node_c_dims = control_dims + num_edges;
+  node_g_dims = node_c_dims + num_edges + 1;
+  edge_c_dims = node_g_dims + num_edges + 1;
+  edge_g_dims = edge_c_dims + num_edges;
   return num_bytes(num_edges);
 }
 
 void Dimensions::set_uniform(const int num_edges, const int state_dim,
-                             const int control_dim, const int c_dim,
-                             const int g_dim, const int global_dim) {
+                             const int control_dim, const int node_c_dim,
+                             const int node_g_dim, const int edge_c_dim,
+                             const int edge_g_dim, const int global_dim) {
   theta_dim = global_dim;
   std::fill_n(const_cast<int *>(state_dims), num_edges + 1, state_dim);
   std::fill_n(const_cast<int *>(control_dims), num_edges, control_dim);
-  std::fill_n(const_cast<int *>(c_dims), num_edges + 1, c_dim);
-  std::fill_n(const_cast<int *>(g_dims), num_edges + 1, g_dim);
+  std::fill_n(const_cast<int *>(node_c_dims), num_edges + 1, node_c_dim);
+  std::fill_n(const_cast<int *>(node_g_dims), num_edges + 1, node_g_dim);
+  std::fill_n(const_cast<int *>(edge_c_dims), num_edges, edge_c_dim);
+  std::fill_n(const_cast<int *>(edge_g_dims), num_edges, edge_g_dim);
 }
 
 int Dimensions::get_schur_dim() const { return theta_dim; }
@@ -86,13 +95,27 @@ int Dimensions::get_control_dim(const int edge) const {
   return control_dims[edge];
 }
 
-int Dimensions::get_c_dim(const int node) const { return c_dims[node]; }
+int Dimensions::get_node_c_dim(const int node) const {
+  return node_c_dims == nullptr ? 0 : node_c_dims[node];
+}
 
-int Dimensions::get_g_dim(const int node) const { return g_dims[node]; }
+int Dimensions::get_node_g_dim(const int node) const {
+  return node_g_dims == nullptr ? 0 : node_g_dims[node];
+}
+
+int Dimensions::get_edge_c_dim(const int edge) const {
+  return edge_c_dims == nullptr ? 0 : edge_c_dims[edge];
+}
+
+int Dimensions::get_edge_g_dim(const int edge) const {
+  return edge_g_dims == nullptr ? 0 : edge_g_dims[edge];
+}
 
 namespace {
 int maximum(const int *values, const int count) {
-  return count == 0 ? 0 : *std::max_element(values, values + count);
+  return values == nullptr || count == 0
+             ? 0
+             : *std::max_element(values, values + count);
 }
 } // namespace
 
@@ -104,12 +127,20 @@ int Dimensions::max_control_dim(const int num_edges) const {
   return maximum(control_dims, num_edges);
 }
 
-int Dimensions::max_c_dim(const int num_nodes) const {
-  return maximum(c_dims, num_nodes);
+int Dimensions::max_node_c_dim(const int num_nodes) const {
+  return maximum(node_c_dims, num_nodes);
 }
 
-int Dimensions::max_g_dim(const int num_nodes) const {
-  return maximum(g_dims, num_nodes);
+int Dimensions::max_node_g_dim(const int num_nodes) const {
+  return maximum(node_g_dims, num_nodes);
+}
+
+int Dimensions::max_edge_c_dim(const int num_edges) const {
+  return maximum(edge_c_dims, num_edges);
+}
+
+int Dimensions::max_edge_g_dim(const int num_edges) const {
+  return maximum(edge_g_dims, num_edges);
 }
 
 int Dimensions::get_stagewise_x_dim(const int num_edges) const {
@@ -123,23 +154,29 @@ int Dimensions::get_x_dim(const int num_edges) const {
   return get_stagewise_x_dim(num_edges) + theta_dim;
 }
 
-int Dimensions::get_y_dim(const int num_nodes) const {
+int Dimensions::get_y_dim(const int num_edges) const {
   int result = 0;
+  const int num_nodes = num_edges + 1;
   for (int node = 0; node < num_nodes; ++node)
-    result += state_dims[node] + c_dims[node];
+    result += state_dims[node] + get_node_c_dim(node);
+  for (int edge = 0; edge < num_edges; ++edge)
+    result += get_edge_c_dim(edge);
   return result;
 }
 
-int Dimensions::get_z_dim(const int num_nodes) const {
+int Dimensions::get_z_dim(const int num_edges) const {
   int result = 0;
+  const int num_nodes = num_edges + 1;
   for (int node = 0; node < num_nodes; ++node)
-    result += g_dims[node];
+    result += get_node_g_dim(node);
+  for (int edge = 0; edge < num_edges; ++edge)
+    result += get_edge_g_dim(edge);
   return result;
 }
 
 int Dimensions::get_stagewise_kkt_dim(const int num_edges) const {
-  return get_stagewise_x_dim(num_edges) + get_y_dim(num_edges + 1) +
-         get_z_dim(num_edges + 1);
+  return get_stagewise_x_dim(num_edges) + get_y_dim(num_edges) +
+         get_z_dim(num_edges);
 }
 
 void LQR::Output::reserve(int num_edges) {
@@ -174,7 +211,7 @@ auto LQR::Output::mem_assign(int num_edges, unsigned char *mem_ptr) -> int {
 void LQR::Workspace::reserve(int state_dim, int control_dim, int num_edges) {
   Dimensions dimensions;
   dimensions.reserve(num_edges);
-  dimensions.set_uniform(num_edges, state_dim, control_dim, 0, 0);
+  dimensions.set_uniform(num_edges, state_dim, control_dim, 0, 0, 0, 0);
   Topology topology;
   topology.reserve(num_edges);
   topology.set_chain();

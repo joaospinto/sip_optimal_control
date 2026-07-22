@@ -20,6 +20,7 @@ cc_test(
     linkstatic = True,
     deps = [
         "//sip_optimal_control:helpers",
+        "//sip_optimal_control:sip_optimal_control",
         "@eigen",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
