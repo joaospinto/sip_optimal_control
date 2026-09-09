@@ -14,6 +14,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       [&input, &workspace](const sip::ModelCallbackInput &mci) -> void {
     const double *theta = mci.x + workspace.stagewise_x_dim;
     workspace.model_callback_input.theta = theta;
+    workspace.model_callback_input.need_derivatives = mci.need_derivatives;
     for (int node = 0; node < input.topology.num_nodes(); ++node) {
       workspace.model_callback_input.nodes[node] = NodeModelCallbackInput{
           .node = node,
@@ -52,7 +53,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       workspace.f += workspace.model_callback_output.edges[edge].f;
     }
 
-    if (mci.new_x) {
+    if (mci.need_derivatives) {
       {
         std::fill_n(workspace.gradient_f, workspace.x_dim, 0.0);
         for (int node = 0; node < input.topology.num_nodes(); ++node) {
@@ -86,7 +87,9 @@ auto solve(const Input &input, const ::sip::Settings &settings,
           }
         }
       }
+    }
 
+    if (mci.new_x) {
       {
         const int root = input.topology.root;
         const int n_root = input.dimensions.get_state_dim(root);

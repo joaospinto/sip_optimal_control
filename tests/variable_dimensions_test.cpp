@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -373,6 +374,7 @@ TEST(Solve, DispatchesStructuredCallback) {
   const std::array<double, 3> primal_scaling = {1.0, 1.0, 1.0};
   const std::array<double, 2> equality_scaling = {1.0, 1.0};
   int model_callback_count = 0;
+  int value_only_callback_count = 0;
 
   Input input{
       .dimensions = {0, state_dims.data(), control_dims.data(),
@@ -381,9 +383,14 @@ TEST(Solve, DispatchesStructuredCallback) {
       .topology = {1, 0, parents.data(), children.data()},
       .initial_state = initial_state.data(),
       .model_callback =
-          [&model_callback_count](const ModelCallbackInput &callback_input,
-                                  ModelCallbackOutput &output) {
+          [&model_callback_count,
+           &value_only_callback_count](const ModelCallbackInput &callback_input,
+                                       ModelCallbackOutput &output) {
             ++model_callback_count;
+            if (!callback_input.need_derivatives) {
+              ++value_only_callback_count;
+            }
+            const double nan = std::numeric_limits<double>::quiet_NaN();
             for (int node = 0; node < 2; ++node) {
               const auto &node_input = callback_input.nodes[node];
               auto &node_output = output.nodes[node];
@@ -398,6 +405,10 @@ TEST(Solve, DispatchesStructuredCallback) {
                 node_output.df_dx[0] = residual;
               }
               node_output.d2L_dx2[0] = 1.0;
+              if (!callback_input.need_derivatives) {
+                node_output.df_dx[0] = nan;
+                node_output.d2L_dx2[0] = nan;
+              }
             }
 
             const auto &edge_input = callback_input.edges[0];
@@ -416,6 +427,15 @@ TEST(Solve, DispatchesStructuredCallback) {
             edge_output.d2L_dx2[0] = 0.0;
             edge_output.d2L_dxdu[0] = 0.0;
             edge_output.d2L_du2[0] = 1.0;
+            if (!callback_input.need_derivatives) {
+              edge_output.df_dx[0] = nan;
+              edge_output.df_du[0] = nan;
+              edge_output.ddyn_dx[0] = nan;
+              edge_output.ddyn_du[0] = nan;
+              edge_output.d2L_dx2[0] = nan;
+              edge_output.d2L_dxdu[0] = nan;
+              edge_output.d2L_du2[0] = nan;
+            }
           },
       .timeout_callback = []() { return false; },
       .residual_scaling =
@@ -440,7 +460,8 @@ TEST(Solve, DispatchesStructuredCallback) {
   const auto output = solve(input, settings, workspace);
 
   EXPECT_EQ(output.exit_status, ::sip::Status::SOLVED);
-  EXPECT_GT(model_callback_count, 0);
+  EXPECT_GT(value_only_callback_count, 0);
+  EXPECT_GT(model_callback_count, value_only_callback_count);
   EXPECT_NEAR(workspace.sip_workspace.vars.x[0], 1.0, 1e-8);
   EXPECT_NEAR(workspace.sip_workspace.vars.x[1], 0.5, 1e-8);
   EXPECT_NEAR(workspace.sip_workspace.vars.x[2], 1.5, 1e-8);

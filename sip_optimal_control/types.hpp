@@ -32,6 +32,9 @@ struct ModelCallbackInput {
   const double *theta;
   NodeModelCallbackInput *nodes;
   EdgeModelCallbackInput *edges;
+  // Whether derivatives are required in addition to model values.
+  // Callbacks may still compute and cache derivatives when false.
+  bool need_derivatives = true;
 
   void reserve(const Topology &topology);
   void free();
