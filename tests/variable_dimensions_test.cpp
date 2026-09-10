@@ -438,11 +438,10 @@ TEST(Solve, DispatchesStructuredCallback) {
             }
           },
       .timeout_callback = []() { return false; },
-      .residual_scaling =
+      .scaling =
           {
-              .dual = primal_scaling.data(),
+              .variable = primal_scaling.data(),
               .equality = equality_scaling.data(),
-              .variable_bound = primal_scaling.data(),
           },
   };
   auto settings = ::sip::Settings{};

@@ -145,10 +145,10 @@ struct Input {
   // [x_0, u_0, ..., x_{E-1}, u_{E-1}, x_E, theta].
   const double *lower_bounds;
   const double *upper_bounds;
-  // Multipliers applied to flattened model residuals. Equality residuals are
+  // Primitive scaling for the flattened model. Equality residuals are
   // [dyn_0, node_c_0, ..., dyn_E, node_c_E, edge_c_0, ..., edge_c_{E-1}];
   // inequalities are [node_g_0, ..., node_g_E, edge_g_0, ..., edge_g_{E-1}].
-  ::sip::Input::ResidualScaling residual_scaling;
+  ::sip::Input::Scaling scaling;
 
   auto num_bound_sides() const -> int;
 };

@@ -196,10 +196,13 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       .get_c = std::cref(get_c),
       .get_g = std::cref(get_g),
       .model_callback = std::cref(model_callback),
-      .timeout_callback = std::cref(input.timeout_callback),
+      .timeout_callback =
+          input.timeout_callback
+              ? ::sip::Input::TimeoutCallback(std::cref(input.timeout_callback))
+              : ::sip::Input::TimeoutCallback{},
       .lower_bounds = input.lower_bounds,
       .upper_bounds = input.upper_bounds,
-      .residual_scaling = input.residual_scaling,
+      .scaling = input.scaling,
       .dimensions =
           {
               .x_dim = input.dimensions.get_x_dim(input.topology.num_edges),
