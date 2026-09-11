@@ -363,7 +363,8 @@ TEST(CallbackProvider, SolvesBranchedSystemWithSchurVariables) {
   expect_kkt_solve(input, workspace, 1e-8);
 }
 
-TEST(Solve, DispatchesStructuredCallback) {
+void expect_structured_solve(const bool initial_model_is_current) {
+  SCOPED_TRACE(initial_model_is_current);
   const std::array<int, 2> state_dims = {1, 1};
   const std::array<int, 1> control_dims = {1};
   const std::array<int, 2> zero_node_dims = {0, 0};
@@ -375,6 +376,7 @@ TEST(Solve, DispatchesStructuredCallback) {
   const std::array<double, 2> equality_scaling = {1.0, 1.0};
   int model_callback_count = 0;
   int value_only_callback_count = 0;
+  int value_evaluation_count = 0;
 
   Input input{
       .dimensions = {0, state_dims.data(), control_dims.data(),
@@ -383,10 +385,20 @@ TEST(Solve, DispatchesStructuredCallback) {
       .topology = {1, 0, parents.data(), children.data()},
       .initial_state = initial_state.data(),
       .model_callback =
-          [&model_callback_count,
-           &value_only_callback_count](const ModelCallbackInput &callback_input,
-                                       ModelCallbackOutput &output) {
+          [&model_callback_count, &value_only_callback_count,
+           &value_evaluation_count, initial_model_is_current](
+              const ModelCallbackInput &callback_input,
+              ModelCallbackOutput &output) {
             ++model_callback_count;
+            value_evaluation_count += callback_input.new_x;
+            if (model_callback_count == 1) {
+              EXPECT_EQ(callback_input.new_x, !initial_model_is_current);
+              EXPECT_TRUE(callback_input.new_y);
+              EXPECT_TRUE(callback_input.new_z);
+              EXPECT_TRUE(callback_input.need_derivatives);
+              EXPECT_EQ(value_evaluation_count,
+                        initial_model_is_current ? 0 : 1);
+            }
             if (!callback_input.need_derivatives) {
               ++value_only_callback_count;
             }
@@ -397,11 +409,15 @@ TEST(Solve, DispatchesStructuredCallback) {
               EXPECT_EQ(node_input.node, node);
               const double state = node_input.state[0];
               if (node == 0) {
-                node_output.f = 0.5 * state * state;
+                if (callback_input.new_x) {
+                  node_output.f = 0.5 * state * state;
+                }
                 node_output.df_dx[0] = state;
               } else {
                 const double residual = state - 2.0;
-                node_output.f = 0.5 * residual * residual;
+                if (callback_input.new_x) {
+                  node_output.f = 0.5 * residual * residual;
+                }
                 node_output.df_dx[0] = residual;
               }
               node_output.d2L_dx2[0] = 1.0;
@@ -417,11 +433,13 @@ TEST(Solve, DispatchesStructuredCallback) {
             EXPECT_EQ(edge_input.parent, 0);
             EXPECT_EQ(edge_input.child, 1);
             const double control = edge_input.control[0];
-            edge_output.f = 0.5 * control * control;
+            if (callback_input.new_x) {
+              edge_output.f = 0.5 * control * control;
+              edge_output.dyn_res[0] =
+                  edge_input.parent_state[0] + control - edge_input.child_state[0];
+            }
             edge_output.df_dx[0] = 0.0;
             edge_output.df_du[0] = control;
-            edge_output.dyn_res[0] = edge_input.parent_state[0] + control -
-                                     edge_input.child_state[0];
             edge_output.ddyn_dx[0] = 1.0;
             edge_output.ddyn_du[0] = 1.0;
             edge_output.d2L_dx2[0] = 0.0;
@@ -443,6 +461,7 @@ TEST(Solve, DispatchesStructuredCallback) {
               .variable = primal_scaling.data(),
               .equality = equality_scaling.data(),
           },
+      .initial_model_is_current = initial_model_is_current,
   };
   auto settings = ::sip::Settings{};
   settings.logging.print_logs = false;
@@ -456,6 +475,28 @@ TEST(Solve, DispatchesStructuredCallback) {
   std::fill_n(workspace.sip_workspace.vars.x, 3, 0.0);
   std::fill_n(workspace.sip_workspace.vars.y, 2, 0.0);
 
+  // Cached node/edge values exist, while the flattened arrays and derivatives
+  // deliberately do not. The first callback must make both usable by SIP.
+  auto &model = workspace.model_callback_output;
+  model.nodes[0].f = 0.0;
+  model.nodes[1].f = 2.0;
+  model.edges[0].f = 0.0;
+  model.edges[0].dyn_res[0] = 0.0;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  std::fill_n(workspace.c, 2, nan);
+  std::fill_n(workspace.gradient_f, 3, nan);
+  for (int node = 0; node < 2; ++node) {
+    model.nodes[node].df_dx[0] = nan;
+    model.nodes[node].d2L_dx2[0] = nan;
+  }
+  model.edges[0].df_dx[0] = nan;
+  model.edges[0].df_du[0] = nan;
+  model.edges[0].ddyn_dx[0] = nan;
+  model.edges[0].ddyn_du[0] = nan;
+  model.edges[0].d2L_dx2[0] = nan;
+  model.edges[0].d2L_dxdu[0] = nan;
+  model.edges[0].d2L_du2[0] = nan;
+
   const auto output = solve(input, settings, workspace);
 
   EXPECT_EQ(output.exit_status, ::sip::Status::SOLVED);
@@ -465,6 +506,11 @@ TEST(Solve, DispatchesStructuredCallback) {
   EXPECT_NEAR(workspace.sip_workspace.vars.x[1], 0.5, 1e-8);
   EXPECT_NEAR(workspace.sip_workspace.vars.x[2], 1.5, 1e-8);
   workspace.free(input.topology);
+}
+
+TEST(Solve, DispatchesStructuredCallback) {
+  expect_structured_solve(false);
+  expect_structured_solve(true);
 }
 
 } // namespace

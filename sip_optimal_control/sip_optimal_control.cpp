@@ -10,11 +10,15 @@ auto solve(const Input &input, const ::sip::Settings &settings,
            Workspace &workspace) -> ::sip::Output {
   CallbackProvider callback_provider(input, workspace);
 
-  const auto model_callback =
-      [&input, &workspace](const sip::ModelCallbackInput &mci) -> void {
+  bool flattened_values_current = false;
+  const auto model_callback = [&input, &workspace, &flattened_values_current](
+                                  const sip::ModelCallbackInput &mci) -> void {
     const double *theta = mci.x + workspace.stagewise_x_dim;
     workspace.model_callback_input.theta = theta;
     workspace.model_callback_input.need_derivatives = mci.need_derivatives;
+    workspace.model_callback_input.new_x = mci.new_x;
+    workspace.model_callback_input.new_y = mci.new_y;
+    workspace.model_callback_input.new_z = mci.new_z;
     for (int node = 0; node < input.topology.num_nodes(); ++node) {
       workspace.model_callback_input.nodes[node] = NodeModelCallbackInput{
           .node = node,
@@ -89,7 +93,9 @@ auto solve(const Input &input, const ::sip::Settings &settings,
       }
     }
 
-    if (mci.new_x) {
+    if (mci.new_x || !flattened_values_current) {
+      // Even cached node/edge values must be flattened on entry to solve().
+      flattened_values_current = true;
       {
         const int root = input.topology.root;
         const int n_root = input.dimensions.get_state_dim(root);
@@ -209,6 +215,7 @@ auto solve(const Input &input, const ::sip::Settings &settings,
               .s_dim = input.dimensions.get_z_dim(input.topology.num_edges),
               .y_dim = input.dimensions.get_y_dim(input.topology.num_edges),
           },
+      .initial_model_is_current = input.initial_model_is_current,
   };
 
   return sip::solve(sip_input, settings, workspace.sip_workspace);

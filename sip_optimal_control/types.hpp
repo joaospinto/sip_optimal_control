@@ -35,6 +35,11 @@ struct ModelCallbackInput {
   // Whether derivatives are required in addition to model values.
   // Callbacks may still compute and cache derivatives when false.
   bool need_derivatives = true;
+  // Coordinate changes relative to the preceding model evaluation. On entry,
+  // new_x can be false when the caller supplies current initial model values.
+  bool new_x = true;
+  bool new_y = true;
+  bool new_z = true;
 
   void reserve(const Topology &topology);
   void free();
@@ -149,6 +154,9 @@ struct Input {
   // [dyn_0, node_c_0, ..., dyn_E, node_c_E, edge_c_0, ..., edge_c_{E-1}];
   // inequalities are [node_g_0, ..., node_g_E, edge_g_0, ..., edge_g_{E-1}].
   ::sip::Input::Scaling scaling;
+  // Node/edge values in the workspace are current at the supplied initial
+  // variables and problem data. The initial callback still requests derivatives.
+  bool initial_model_is_current = false;
 
   auto num_bound_sides() const -> int;
 };

@@ -14,3 +14,13 @@ problems.
 You can find a usage example in the
 [SIP Examples](https://github.com/joaospinto/sip_examples)
 repository.
+
+## Initial model cache
+
+`Input::initial_model_is_current` forwards SIP's initial-cache contract. Set it
+only when the workspace's node/edge model values match the initial variables
+and current problem data. The model callback receives `new_x=false`,
+`new_y=new_z=true`, and `need_derivatives=true` on entry; these flags are also
+forwarded on later evaluations. The adapter assembles the flattened constraint
+arrays on the first callback even when node/edge values are reused. The default
+is false, and caller-provided slacks are preserved.
